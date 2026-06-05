@@ -1,0 +1,49 @@
+# Node dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment variables & secrets
+.env*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Python envs & DBs
+backend/venv/
+backend/__pycache__/
+backend/app/__pycache__/
+backend/app/services/__pycache__/
+backend/egregora.db
+backend/generated_contracts/
+*.pyc
+*.pyo
+*.pyd
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.log

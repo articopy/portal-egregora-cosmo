@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+  --background: #111622;
+  --foreground: #ffffff;
+  --card: #1A1D29;
+  --gold: #E2B042;
+  --gold-hover: #D69E2E;
+  --success: #38A169;
+  --danger: #E53E3E;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-gold: var(--gold);
+  --color-gold-hover: var(--gold-hover);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Josefin Sans', Inter, system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom mystical glowing effects */
+.mystic-glow {
+  box-shadow: 0 0 15px rgba(226, 176, 66, 0.15);
+}
+
+.mystic-border {
+  border: 1px solid rgba(226, 176, 66, 0.2);
+}
+
+.mystic-border-hover:hover {
+  border-color: rgba(226, 176, 66, 0.6);
+  box-shadow: 0 0 20px rgba(226, 176, 66, 0.25);
+  transition: all 0.3s ease;
+}
+
+.nebula-gradient {
+  background: radial-gradient(circle at 10% 20%, rgba(90, 40, 150, 0.2) 0%, transparent 40%),
+              radial-gradient(circle at 90% 80%, rgba(20, 60, 120, 0.2) 0%, transparent 40%),
+              #111622;
+}
+
+/* Custom golden gradient text styling */
+.text-gold-gradient {
+  background: linear-gradient(135deg, #FFE082 0%, #E2B042 50%, #B2891E 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Custom glowing indicators */
+.glow-gold {
+  box-shadow: 0 0 15px rgba(226, 176, 66, 0.5);
+}
+
+.glow-green {
+  box-shadow: 0 0 15px rgba(56, 161, 105, 0.5);
+}
+
+.glow-red {
+  box-shadow: 0 0 15px rgba(229, 62, 62, 0.5);
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(26, 29, 41, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 176, 66, 0.15);
+}
+
+/* Golden custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #111622;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(226, 176, 66, 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(226, 176, 66, 0.6);
+}
+
+/* Animations */
+@keyframes nebulaPulse {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+.animate-nebula {
+  animation: nebulaPulse 10s ease-in-out infinite;
+}
+
