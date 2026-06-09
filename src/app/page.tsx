@@ -12,6 +12,8 @@ interface Condomino {
   status_operacional: "AGUARDANDO_ASSINATURA" | "ATIVO_PENDENTE_PAGAMENTO" | "ATIVO_ADIMPLENTE" | "SUSPENSO_INADIMPLENCIA" | "BLOQUEADO_ASSIDUIDADE";
   youtube_channel_id: string;
   asaas_customer_id: string;
+  zapsign_doc_id?: string;
+  zapsign_sign_url?: string;
   chave_pix: string;
   data_onboarding: string;
   videos_entregues_esta_semana: number;
@@ -71,6 +73,7 @@ const DEFAULT_CONDOMINOS: Condomino[] = [
 ];
 
 export default function EgrégoraCMS() {
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
   const [activeTab, setActiveTab] = useState<"onboarding" | "admin" | "creator">("admin");
   const [condominos, setCondominos] = useState<Condomino[]>([]);
   const [selectedCreatorId, setSelectedCreatorId] = useState<string>("");
@@ -109,7 +112,7 @@ export default function EgrégoraCMS() {
   // Initialize data from API
   const fetchCondominos = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/condominos");
+      const res = await fetch(`${API_BASE_URL}/api/condominos`);
       if (res.ok) {
         const data = await res.json();
         const mapped = data.map((c: any) => ({
@@ -121,6 +124,8 @@ export default function EgrégoraCMS() {
           status_operacional: c.status,
           youtube_channel_id: c.youtube_id || "",
           asaas_customer_id: c.asaas_id || "",
+          zapsign_doc_id: c.zapsign_doc_id || "",
+          zapsign_sign_url: c.zapsign_sign_url || "",
           chave_pix: c.chave_pix || "",
           data_onboarding: c.data_onboarding,
           videos_entregues_esta_semana: c.status === "ATIVO_ADIMPLENTE" ? 2 : 0,
@@ -135,7 +140,7 @@ export default function EgrégoraCMS() {
 
   const fetchFechamentos = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/admin/fechamentos");
+      const res = await fetch(`${API_BASE_URL}/api/admin/fechamentos`);
       if (res.ok) {
         const data = await res.json();
         setFechamentos(data);
@@ -190,7 +195,7 @@ export default function EgrégoraCMS() {
     if (!target) return;
 
     try {
-      const res = await fetch("http://localhost:8000/api/webhooks/asaas", {
+      const res = await fetch(`${API_BASE_URL}/api/webhooks/asaas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -216,6 +221,32 @@ export default function EgrégoraCMS() {
     } catch (err) {
       console.error(err);
       alert("Erro ao conectar com o webhook do backend.");
+    }
+  };
+
+  const handleDeleteCondomino = async (id: string, name: string) => {
+    if (!confirm(`Deseja realmente excluir o condômino "${name}" de teste?`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/condominos/${id}`, {
+        method: "DELETE"
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`Erro ao excluir: ${errData.detail || "Erro desconhecido"}`);
+        return;
+      }
+
+      addLog("SISTEMA", `Condômino ${name} excluído do banco de dados.`);
+      await fetchCondominos();
+      
+      if (selectedCreatorId === id) {
+        setSelectedCreatorId("");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao conectar ao backend para excluir o registro.");
     }
   };
 
@@ -303,7 +334,7 @@ export default function EgrégoraCMS() {
     e.preventDefault();
 
     try {
-      const res = await fetch("http://localhost:8000/api/condominos", {
+      const res = await fetch(`${API_BASE_URL}/api/condominos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -370,7 +401,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
     if (!createdId) return;
 
     try {
-      const res = await fetch(`http://localhost:8000/api/condominos/${createdId}/assinar`, {
+      const res = await fetch(`${API_BASE_URL}/api/condominos/${createdId}/assinar`, {
         method: "POST"
       });
 
@@ -430,7 +461,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
   const handleRunClosing = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://localhost:8000/api/admin/fechamento", {
+      const res = await fetch(`${API_BASE_URL}/api/admin/fechamento`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -552,7 +583,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 </p>
                 <div className="mb-6">
                   <a
-                    href={`http://localhost:8000/api/condominos/${selectedCreatorId}/contrato`}
+                    href={`${API_BASE_URL}/api/condominos/${selectedCreatorId}/contrato`}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 border border-[#E2B042]/40 rounded-lg text-xs font-semibold text-[#E2B042] hover:bg-[#E2B042]/10 transition-all cursor-pointer"
@@ -1047,14 +1078,21 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                                   💲 Pago
                                 </button>
                                 <button
-                                  onClick={() => triggerAsaasWebhook(c.id, "PAYMENT_OVERDUE")}
-                                  title="Simular atraso > 10 dias"
-                                  className="px-1.5 py-1 bg-red-900/60 text-red-300 rounded hover:bg-red-800/80 text-[10px]"
-                                >
-                                  ⚠️ Atraso
-                                </button>
-                              </div>
-                            </td>
+                                   onClick={() => triggerAsaasWebhook(c.id, "PAYMENT_OVERDUE")}
+                                   title="Simular atraso > 10 dias"
+                                   className="px-1.5 py-1 bg-red-900/60 text-red-300 rounded hover:bg-red-800/80 text-[10px]"
+                                 >
+                                   ⚠️ Atraso
+                                 </button>
+                                 <button
+                                   onClick={() => handleDeleteCondomino(c.id, c.nome_comercial)}
+                                   title="Deletar condomínio de teste"
+                                   className="px-1.5 py-1 bg-red-950/40 text-red-400 border border-red-900/50 rounded hover:bg-red-900/40 text-[10px]"
+                                 >
+                                   🗑️ Excluir
+                                 </button>
+                               </div>
+                             </td>
                           </tr>
                         );
                       })}
@@ -1240,7 +1278,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                           <p className="text-xs text-gray-400 font-mono mt-1 flex items-center gap-3">
                             <span>ID Canal: {current.youtube_channel_id}</span>
                             <a
-                              href={`http://localhost:8000/api/condominos/${current.id}/contrato`}
+                              href={`${API_BASE_URL}/api/condominos/${current.id}/contrato`}
                               target="_blank"
                               rel="noreferrer"
                               className="text-[10px] text-[#E2B042] hover:underline flex items-center gap-1 cursor-pointer"

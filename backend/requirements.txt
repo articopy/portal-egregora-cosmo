@@ -4,4 +4,4 @@ sqlalchemy
 python-dotenv
 python-docx
 pydantic
-
+psycopg2-binary
