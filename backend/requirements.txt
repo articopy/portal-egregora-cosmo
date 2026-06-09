@@ -6,3 +6,4 @@ python-docx
 pydantic
 psycopg2-binary
 email-validator
+requests
