@@ -1133,6 +1133,9 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                       onChange={e => setFormData({ ...formData, nome_comercial: e.target.value })}
                       className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
                     />
+                    <p className="text-[9px] text-[#E2B042]/85 mt-1 font-medium leading-relaxed">
+                      ⚠️ Atenção: Este nome será utilizado exatamente como o título da sua Playlist oficial dentro do canal principal da Cosmo Alma TV.
+                    </p>
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">Razão Social (Opcional)</label>
