@@ -447,7 +447,16 @@ export default function EgrégoraCMS() {
   };
 
   const handleDeleteCondomino = async (id: string, name: string) => {
-    if (!confirm(`Deseja realmente excluir o condômino "${name}" de teste?`)) return;
+    if (!confirm(`Deseja realmente excluir o condômino "${name}"?`)) return;
+
+    if (id.startsWith("cond-")) {
+      setCondominos(prev => prev.filter(c => c.id !== id));
+      addLog("SISTEMA", `Condômino fictício ${name} removido da visualização local.`);
+      if (selectedCreatorId === id) {
+        setSelectedCreatorId("");
+      }
+      return;
+    }
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
