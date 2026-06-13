@@ -72,3 +72,46 @@ export async function DELETE(
     return NextResponse.json({ detail: err.message }, { status: 500 });
   }
 }
+
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const user = await getAuthenticatedUser(request);
+    if (!user) {
+      return NextResponse.json({ detail: "Acesso não autorizado. Sessão inválida ou expirada." }, { status: 401 });
+    }
+
+    const isAdmin = isUserAdmin(user);
+    if (!isAdmin) {
+      return NextResponse.json({ detail: "Acesso proibido. Apenas administradores podem editar condôminos." }, { status: 403 });
+    }
+
+    const { id } = await params;
+    const body = await request.json();
+
+    const allowedUpdates: any = {};
+    if (body.youtube_id !== undefined) allowedUpdates.youtube_id = body.youtube_id;
+    if (body.status !== undefined) allowedUpdates.status = body.status;
+
+    if (Object.keys(allowedUpdates).length === 0) {
+      return NextResponse.json({ detail: "Nenhum campo informado para atualização." }, { status: 400 });
+    }
+
+    const { data: updated, error } = await supabase
+      .from("condominos")
+      .update(allowedUpdates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ detail: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(updated);
+  } catch (err: any) {
+    return NextResponse.json({ detail: err.message }, { status: 500 });
+  }
+}

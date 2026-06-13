@@ -473,6 +473,34 @@ export default function EgrégoraCMS() {
     localStorage.setItem("egregora_logs", JSON.stringify(newLogs));
   };
 
+  const handleSavePlaylistId = async (id: string, playlistId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+
+      const res = await fetch(`${API_BASE_URL}/api/condominos/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ youtube_id: playlistId })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`Erro ao salvar Playlist ID: ${errData.detail || "Erro desconhecido"}`);
+        return;
+      }
+
+      addLog("SISTEMA", `ID da Playlist de YouTube atualizada com sucesso para o condômino.`);
+      await fetchCondominos();
+    } catch (err: any) {
+      console.error(err);
+      alert(`Erro de conexão ao salvar Playlist ID: ${err.message}`);
+    }
+  };
+
   // State Machine Trigger - Asaas Webhooks
   const triggerAsaasWebhook = async (condominoId: string, eventType: "PAYMENT_RECEIVED" | "PAYMENT_OVERDUE") => {
     const target = condominos.find(c => c.id === condominoId);
@@ -1270,28 +1298,16 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">ID da Playlist do Criador no YouTube (Opcional)</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: PL_exemplo123..."
-                      value={formData.youtube_channel_id}
-                      onChange={e => setFormData({ ...formData, youtube_channel_id: e.target.value })}
-                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">Chave PIX de Recebimento</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Chave Pix (E-mail, CNPJ, Celular)"
-                      value={formData.chave_pix}
-                      onChange={e => setFormData({ ...formData, chave_pix: e.target.value })}
-                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">Chave PIX de Recebimento</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Chave Pix (E-mail, CNPJ, Celular)"
+                    value={formData.chave_pix}
+                    onChange={e => setFormData({ ...formData, chave_pix: e.target.value })}
+                    className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
+                  />
                 </div>
 
                 <div className="pt-4">
@@ -1505,6 +1521,16 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                                    className="px-1.5 py-1 bg-red-900/60 text-red-300 rounded hover:bg-red-800/80 text-[10px]"
                                  >
                                    ⚠️ Atraso
+                                 </button>
+                                 <button
+                                   onClick={() => {
+                                     const pId = prompt(`Insira o ID da Playlist do YouTube para "${c.nome_comercial}":`, c.youtube_channel_id || "");
+                                     if (pId !== null) handleSavePlaylistId(c.id, pId);
+                                   }}
+                                   title="Associar Playlist do YouTube"
+                                   className="px-1.5 py-1 bg-purple-900/60 text-purple-300 rounded hover:bg-purple-800/80 text-[10px]"
+                                 >
+                                   ✏️ Playlist
                                  </button>
                                  <button
                                    onClick={() => handleDeleteCondomino(c.id, c.nome_comercial)}
