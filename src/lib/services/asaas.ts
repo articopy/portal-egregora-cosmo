@@ -1,5 +1,5 @@
-const ASAAS_API_KEY = process.env.ASAAS_API_KEY || "";
-const ASAAS_API_URL = process.env.ASAAS_API_URL || "https://sandbox.asaas.com/v3";
+const ASAAS_API_KEY = (process.env.ASAAS_API_KEY || "").trim();
+const ASAAS_API_URL = (process.env.ASAAS_API_URL || "https://sandbox.asaas.com/v3").trim();
 
 function generateMockId(prefix: string): string {
   const randomStr = Math.random().toString(36).substring(2, 12);

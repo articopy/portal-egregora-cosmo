@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { generateContractDocxBuffer } from "@/lib/services/contract";
+import { getAuthenticatedUser, isUserAdmin } from "@/lib/auth";
 
 export async function GET(
   request: Request,
@@ -18,6 +19,25 @@ export async function GET(
 
     if (error || !condomino) {
       return NextResponse.json({ detail: "Condômino não encontrado." }, { status: 404 });
+    }
+
+    // Se o status for de onboarding (aguardando assinatura ou pendente do primeiro pagamento),
+    // permitimos o download público sem autenticação para apoiar o fluxo imediato de cadastro.
+    const isOnboarding = condomino.status === "AGUARDANDO_ASSINATURA" || condomino.status === "ATIVO_PENDENTE_PAGAMENTO";
+
+    if (!isOnboarding) {
+      // Exige autenticação para os demais status
+      const user = await getAuthenticatedUser(request);
+      if (!user) {
+        return NextResponse.json({ detail: "Acesso não autorizado. Sessão inválida ou expirada." }, { status: 401 });
+      }
+
+      const isAdmin = isUserAdmin(user);
+      const isOwnRecord = condomino.email?.toLowerCase() === user.email?.toLowerCase();
+
+      if (!isAdmin && !isOwnRecord) {
+        return NextResponse.json({ detail: "Acesso proibido. Você não tem permissão para baixar este contrato." }, { status: 403 });
+      }
     }
 
     // Generate contract DOCX buffer dynamically

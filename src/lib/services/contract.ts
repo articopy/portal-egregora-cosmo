@@ -43,16 +43,20 @@ export function generateContractDocxBuffer(data: ContractData): Buffer {
 
   const addressStr = `${data.endereco || ""}, ${data.cidade || ""} - ${data.uf || ""}, CEP ${data.cep || ""}, ${data.pais || "Brasil"}`;
 
+  const isCnpj = data.cnpjCpf.replace(/\D/g, "").length > 11;
+  const cpfOrCnpj = isCnpj ? "CNPJ" : "CPF";
+  const tipoPessoa = isCnpj ? "jurídica" : "física";
+  const nomeParte = data.razaoSocial || data.nomeCompleto;
+
   const replacements: Record<string, string> = {
-    "PARADOXO CASA ATELIÊ": data.nomeComercial.toUpperCase(),
-    "49.759.501/0001-45": data.cnpjCpf,
-    "MANY XAVIER DE BRITO E SOUZA BERNABÊ": data.nomeCompleto.toUpperCase(),
-    "MANY XAVIER DE BRITO E SOUZA BERNABÉ": data.nomeCompleto.toUpperCase(),
-    "Many Xavier de B. e S. Bernabé": data.nomeCompleto,
-    "789.620.807-53": data.cnpjCpf,
-    "brasileira": nacionalidade,
-    "casada": (data.estadoCivil || "solteiro(a)").toLowerCase(),
-    "Avenida Edson Passos, nº 87, sobrado, Usina, Rio de Janeiro, RJ": addressStr,
+    "[nome PESSOA FISICA OU JURÍDICA]": nomeParte.toUpperCase(),
+    "[física/jurídica]": tipoPessoa,
+    "[CPF/CNPJ]": cpfOrCnpj,
+    "[número cpf OU cnpj]": data.cnpjCpf,
+    "[NOME]": data.nomeCompleto.toUpperCase(),
+    "[ESTADO civil]": (data.estadoCivil || "solteiro(a)").toLowerCase(),
+    "[CPF]": data.cnpjCpf,
+    "[ENDEREÇO]": addressStr,
   };
 
   // Files in DOCX zip where text can reside

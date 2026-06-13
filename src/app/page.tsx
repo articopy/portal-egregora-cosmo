@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+import { User } from "@supabase/supabase-js";
 
 // Types
 interface Condomino {
@@ -74,10 +77,16 @@ const DEFAULT_CONDOMINOS: Condomino[] = [
 
 export default function EgrégoraCMS() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
-  const [activeTab, setActiveTab] = useState<"onboarding" | "admin" | "creator">("admin");
+  const [activeTab, setActiveTab] = useState<"onboarding" | "admin" | "creator">("onboarding");
+  const [mounted, setMounted] = useState(false);
   const [condominos, setCondominos] = useState<Condomino[]>([]);
   const [selectedCreatorId, setSelectedCreatorId] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<"admin" | "creator" | null>(null);
+  const [associatedCreator, setAssociatedCreator] = useState<Condomino | null>(null);
 
   // Fechamentos state
   const [fechamentos, setFechamentos] = useState<any[]>([]);
@@ -94,6 +103,8 @@ export default function EgrégoraCMS() {
     youtube_channel_id: "",
     chave_pix: "",
     currentCreatedId: "",
+    zapsign_sign_url: "",
+    zapsign_doc_id: "",
     genero: "Não declarado",
     estado_civil: "solteiro",
     cep: "",
@@ -108,11 +119,115 @@ export default function EgrégoraCMS() {
   const [signingContract, setSigningContract] = useState<boolean>(false);
   const [generatedContractText, setGeneratedContractText] = useState<string>("");
   const [isOnboardingCompleted, setIsOnboardingCompleted] = useState<boolean>(false);
+  const [formErrors, setFormErrors] = useState<{ email?: string; cnpj_cpf?: string }>({});
+
+  // API Test States
+  const [testZapSignResult, setTestZapSignResult] = useState<any>(null);
+  const [testAsaasResult, setTestAsaasResult] = useState<any>(null);
+  const [testYoutubeResult, setTestYoutubeResult] = useState<any>(null);
+  const [testYoutubeChannelId, setTestYoutubeChannelId] = useState<string>("UCF0p5j1QEYT4jM-8Ttg86tA");
+  const [isTestingZapSign, setIsTestingZapSign] = useState<boolean>(false);
+  const [isTestingAsaas, setIsTestingAsaas] = useState<boolean>(false);
+  const [isTestingYoutube, setIsTestingYoutube] = useState<boolean>(false);
+
+  const runTestZapSign = async () => {
+    setIsTestingZapSign(true);
+    setTestZapSignResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      const res = await fetch(`${API_BASE_URL}/api/admin/test/assinafy`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      setTestZapSignResult(data);
+      if (data.success) {
+        addLog("CONTRATO", `Teste Assinafy executado com sucesso (${data.mode}). ID: ${data.doc_id}`);
+      } else {
+        addLog("CONTRATO", `Erro no teste Assinafy: ${data.error}`);
+      }
+    } catch (err: any) {
+      setTestZapSignResult({ success: false, error: err.message });
+      addLog("CONTRATO", `Falha de conexão no teste Assinafy: ${err.message}`);
+    } finally {
+      setIsTestingZapSign(false);
+    }
+  };
+
+  const runTestAsaas = async () => {
+    setIsTestingAsaas(true);
+    setTestAsaasResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      const res = await fetch(`${API_BASE_URL}/api/admin/test/asaas`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      setTestAsaasResult(data);
+      if (data.success) {
+        addLog("ASAAS", `Teste Asaas executado com sucesso (${data.mode}). Cust: ${data.customer_id}`);
+      } else {
+        addLog("ASAAS", `Erro no teste Asaas: ${data.error}`);
+      }
+    } catch (err: any) {
+      setTestAsaasResult({ success: false, error: err.message });
+      addLog("ASAAS", `Falha de conexão no teste Asaas: ${err.message}`);
+    } finally {
+      setIsTestingAsaas(false);
+    }
+  };
+
+  const runTestYoutube = async () => {
+    setIsTestingYoutube(true);
+    setTestYoutubeResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      const res = await fetch(`${API_BASE_URL}/api/admin/test/youtube`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ youtubeChannelId: testYoutubeChannelId })
+      });
+      const data = await res.json();
+      setTestYoutubeResult(data);
+      if (data.success) {
+        addLog("YOUTUBE", `Teste YouTube executado com sucesso (${data.mode}). Encontrados: ${data.uploads_count}`);
+      } else {
+        addLog("YOUTUBE", `Erro no teste YouTube: ${data.error}`);
+      }
+    } catch (err: any) {
+      setTestYoutubeResult({ success: false, error: err.message });
+      addLog("YOUTUBE", `Falha de conexão no teste YouTube: ${err.message}`);
+    } finally {
+      setIsTestingYoutube(false);
+    }
+  };
 
   // Initialize data from API
   const fetchCondominos = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/condominos`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      } else {
+        setCondominos([]);
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/condominos`, { headers });
       if (res.ok) {
         const data = await res.json();
         const mapped = data.map((c: any) => ({
@@ -132,6 +247,8 @@ export default function EgrégoraCMS() {
           receita_adsense_gerada: c.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
         }));
         setCondominos(mapped);
+      } else if (res.status === 401 || res.status === 403) {
+        setCondominos([]);
       }
     } catch (err) {
       console.error("Erro ao carregar condôminos da API:", err);
@@ -140,7 +257,17 @@ export default function EgrégoraCMS() {
 
   const fetchFechamentos = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/admin/fechamentos`);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) {
+        setFechamentos([]);
+        return;
+      }
+      const res = await fetch(`${API_BASE_URL}/api/admin/fechamentos`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setFechamentos(data);
@@ -150,7 +277,98 @@ export default function EgrégoraCMS() {
     }
   };
 
+  const determineUserRoleAndCreator = async (user: User) => {
+    const adminEmails = [
+      "admin@portal.cosmoalmatv.com.br",
+      "alexandre.p@portal.cosmoalmatv.com.br",
+      "marcos.caram@portal.cosmoalmatv.com.br",
+      "carlos.falcon@portal.cosmoalmatv.com.br"
+    ];
+    const isAdmin = adminEmails.includes(user.email || "") || 
+                    user.user_metadata?.role === "admin";
+    
+    if (isAdmin) {
+      setUserRole("admin");
+      setActiveTab("admin");
+    } else {
+      setUserRole("creator");
+      setActiveTab("creator");
+      
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const headers: HeadersInit = {};
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+
+        const res = await fetch(`${API_BASE_URL}/api/condominos`, { headers });
+        if (res.ok) {
+          const data = await res.json();
+          const match = data.find((c: any) => c.email.toLowerCase() === user.email?.toLowerCase());
+          if (match) {
+            setSelectedCreatorId(match.id);
+            setAssociatedCreator({
+              id: match.id,
+              nome_comercial: match.nome_comercial,
+              razao_social: match.razao_social,
+              cnpj_cpf: match.cnpj_cpf,
+              email: match.email,
+              status_operacional: match.status,
+              youtube_channel_id: match.youtube_id || "",
+              asaas_customer_id: match.asaas_id || "",
+              zapsign_doc_id: match.zapsign_doc_id || "",
+              zapsign_sign_url: match.zapsign_sign_url || "",
+              chave_pix: match.chave_pix || "",
+              data_onboarding: match.data_onboarding,
+              videos_entregues_esta_semana: match.status === "ATIVO_ADIMPLENTE" ? 2 : 0,
+              receita_adsense_gerada: match.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao carregar criador associado:", err);
+      }
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setUserRole(null);
+    setAssociatedCreator(null);
+    setActiveTab("onboarding");
+  };
+
   useEffect(() => {
+    setMounted(true);
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setCurrentUser(session.user);
+        await determineUserRoleAndCreator(session.user);
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+        setAssociatedCreator(null);
+        setActiveTab("onboarding");
+      }
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        setCurrentUser(session.user);
+        await determineUserRoleAndCreator(session.user);
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+        setAssociatedCreator(null);
+        setActiveTab("onboarding");
+      }
+    });
+
     fetchCondominos();
     fetchFechamentos();
 
@@ -169,6 +387,10 @@ export default function EgrégoraCMS() {
       setLogs(initialLogs);
       localStorage.setItem("egregora_logs", JSON.stringify(initialLogs));
     }
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const saveState = (updatedCondominos: Condomino[], updatedLogs: LogEntry[]) => {
@@ -228,8 +450,14 @@ export default function EgrégoraCMS() {
     if (!confirm(`Deseja realmente excluir o condômino "${name}" de teste?`)) return;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+
       const res = await fetch(`${API_BASE_URL}/api/condominos/${id}`, {
-        method: "DELETE"
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
 
       if (!res.ok) {
@@ -333,6 +561,35 @@ export default function EgrégoraCMS() {
   const handleOnboardingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const errors: { email?: string; cnpj_cpf?: string } = {};
+
+    // Validate email format
+    if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      errors.email = "Formato de e-mail inválido (ex: exemplo@dominio.com).";
+    }
+
+    // Validate CPF / CNPJ
+    const cleanDoc = (formData.cnpj_cpf || "").replace(/\D/g, "");
+    if (cleanDoc.length === 11) {
+      if (!isValidCpf(cleanDoc)) {
+        errors.cnpj_cpf = "O CPF informado é inválido matematicamente. Verifique os dígitos.";
+      }
+    } else if (cleanDoc.length === 14) {
+      if (!isValidCnpj(cleanDoc)) {
+        errors.cnpj_cpf = "O CNPJ informado é inválido matematicamente. Verifique os dígitos.";
+      }
+    } else {
+      errors.cnpj_cpf = "O documento deve ser um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      alert("Por favor, corrija os erros de validação destacados no formulário antes de continuar.");
+      return;
+    }
+
+    setFormErrors({});
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/condominos`, {
         method: "POST",
@@ -388,7 +645,12 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
       `;
 
       setGeneratedContractText(contractText);
-      setFormData(prev => ({ ...prev, currentCreatedId: created.id }));
+      setFormData(prev => ({ 
+        ...prev, 
+        currentCreatedId: created.id,
+        zapsign_sign_url: created.zapsign_sign_url || "",
+        zapsign_doc_id: created.zapsign_doc_id || ""
+      }));
       setSigningContract(true);
     } catch (err) {
       console.error(err);
@@ -461,9 +723,14 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
   const handleRunClosing = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
       const res = await fetch(`${API_BASE_URL}/api/admin/fechamento`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
         body: JSON.stringify({
           mes_referencia: closingMonth,
           receita_bruta_adsense: parseFloat(closingAdsense)
@@ -526,42 +793,81 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
           </div>
         </div>
 
-        <nav className="flex gap-2">
-          <button
-            onClick={() => { setActiveTab("onboarding"); setIsOnboardingCompleted(false); }}
-            className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ${
-              activeTab === "onboarding"
-                ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
-                : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
-            }`}
-          >
-            🌌 ONBOARDING PÚBLICO
-          </button>
-          <button
-            onClick={() => setActiveTab("admin")}
-            className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ${
-              activeTab === "admin"
-                ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
-                : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
-            }`}
-          >
-            📊 PAINEL GESTÃO (ADMIN)
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("creator");
-              if (!selectedCreatorId && condominos.length > 0) {
-                setSelectedCreatorId(condominos[0].id);
-              }
-            }}
-            className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 ${
-              activeTab === "creator"
-                ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
-                : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
-            }`}
-          >
-            🧘 ÁREA DO CRIADOR
-          </button>
+        <nav className="flex gap-2 items-center">
+          {mounted && (
+            <>
+              {/* Public Tab */}
+              {(!currentUser || userRole === "admin") && (
+                <button
+                  onClick={() => { setActiveTab("onboarding"); setIsOnboardingCompleted(false); }}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
+                    activeTab === "onboarding"
+                      ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
+                      : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
+                  }`}
+                >
+                  🌌 ONBOARDING PÚBLICO
+                </button>
+              )}
+
+              {/* Admin Tab */}
+              {currentUser && userRole === "admin" && (
+                <button
+                  onClick={() => setActiveTab("admin")}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
+                    activeTab === "admin"
+                      ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
+                      : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
+                  }`}
+                >
+                  📊 PAINEL GESTÃO (ADMIN)
+                </button>
+              )}
+
+              {/* Creator Tab */}
+              {currentUser && (userRole === "admin" || userRole === "creator") && (
+                <button
+                  onClick={() => {
+                    setActiveTab("creator");
+                    if (userRole === "creator" && associatedCreator) {
+                      setSelectedCreatorId(associatedCreator.id);
+                    } else if (!selectedCreatorId && condominos.length > 0) {
+                      setSelectedCreatorId(condominos[0].id);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
+                    activeTab === "creator"
+                      ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
+                      : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
+                  }`}
+                >
+                  🧘 ÁREA DO CRIADOR
+                </button>
+              )}
+
+              {/* Login / Logout Button */}
+              {!currentUser ? (
+                <button
+                  onClick={() => router.push("/login")}
+                  className="px-4 py-2 rounded-full text-xs font-semibold tracking-wider bg-[#1A1D29] text-[#E2B042] hover:text-white border border-[#E2B042]/40 hover:bg-[#E2B042]/10 transition-all cursor-pointer font-bold"
+                >
+                  🔑 ENTRAR
+                </button>
+              ) : (
+                <div className="flex items-center gap-3 ml-2 border-l border-gray-800 pl-3">
+                  <span className="text-[10px] text-gray-400 font-mono hidden md:inline truncate max-w-[120px]" title={currentUser.email}>
+                    {currentUser.email}
+                  </span>
+                  <button
+                    onClick={handleLogout}
+                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-red-950/40 text-red-400 hover:text-red-300 border border-red-900/50 hover:bg-red-900/30 transition-all cursor-pointer"
+                  >
+                    🚪 SAIR
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </nav>
       </header>
 
@@ -569,7 +875,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
       <main className="flex-1 p-6 md:p-12 max-w-7xl mx-auto w-full">
         
         {/* Tab 1: Onboarding Form */}
-        {activeTab === "onboarding" && (
+        {mounted && (activeTab === "onboarding" || !currentUser) && (
           <div className="max-w-2xl mx-auto bg-[#1A1D29] border border-[#E2B042]/20 p-8 rounded-2xl mystic-glow relative overflow-hidden">
             <div className="absolute top-0 right-0 h-40 w-40 bg-purple-500/10 rounded-full blur-3xl"></div>
             
@@ -608,24 +914,24 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
               </div>
             ) : signingContract ? (
               <div>
-                <h3 className="text-lg font-semibold text-[#E2B042] mb-4">Assinatura do Contrato V2 no ZapSign</h3>
+                <h3 className="text-lg font-semibold text-[#E2B042] mb-4">Assinatura do Contrato V2 no Assinafy</h3>
                 <p className="text-xs text-gray-300 mb-4">
-                  O contrato oficial da Cosmo Alma TV foi compilado com seus dados e gerado no **ZapSign**. 
+                  O contrato oficial da Cosmo Alma TV foi compilado com seus dados e gerado no **Assinafy**. 
                   Clique no botão abaixo para abrir a tela de assinatura e assinar digitalmente.
                 </p>
                 <div className="mb-6 text-center">
                   <a
-                    href={condominos.find(c => c.id === formData.currentCreatedId)?.zapsign_sign_url || "#"}
+                    href={formData.zapsign_sign_url || "#"}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-2 px-6 py-3 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-bold rounded-lg text-xs tracking-wider uppercase shadow-[0_0_15px_rgba(226,176,66,0.3)] transition-all cursor-pointer"
                   >
-                    🖊️ Abrir Contrato no ZapSign
+                    🖊️ Abrir Contrato no Assinafy
                   </a>
                 </div>
                 <div className="border-t border-gray-800 pt-4 mt-4 flex justify-between items-center">
                   <span className="text-[10px] text-gray-500 font-mono">
-                    ID ZapSign: {condominos.find(c => c.id === formData.currentCreatedId)?.zapsign_doc_id || "Carregando..."}
+                    ID Assinafy: {formData.zapsign_doc_id || "Carregando..."}
                   </span>
                   <div className="flex gap-2">
                     <button
@@ -742,9 +1048,19 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                       required
                       placeholder={docType === "CPF" ? "000.000.000-00" : "00.000.000/0001-00"}
                       value={formData.cnpj_cpf}
-                      onChange={e => setFormData({ ...formData, cnpj_cpf: formatCnpjCpf(e.target.value, docType) })}
-                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
+                      onChange={e => {
+                        setFormData({ ...formData, cnpj_cpf: formatCnpjCpf(e.target.value, docType) });
+                        if (formErrors.cnpj_cpf) {
+                          setFormErrors(prev => ({ ...prev, cnpj_cpf: undefined }));
+                        }
+                      }}
+                      className={`w-full bg-[#111622] border rounded-lg p-2.5 text-sm focus:outline-none transition-colors ${
+                        formErrors.cnpj_cpf ? "border-red-500 focus:border-red-500 text-red-200" : "border-gray-800 focus:border-[#E2B042]"
+                      }`}
                     />
+                    {formErrors.cnpj_cpf && (
+                      <p className="text-red-500 text-[10px] mt-1 font-semibold">{formErrors.cnpj_cpf}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">E-mail de Contato</label>
@@ -753,9 +1069,19 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                       required
                       placeholder="seuemail@exemplo.com"
                       value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
+                      onChange={e => {
+                        setFormData({ ...formData, email: e.target.value });
+                        if (formErrors.email) {
+                          setFormErrors(prev => ({ ...prev, email: undefined }));
+                        }
+                      }}
+                      className={`w-full bg-[#111622] border rounded-lg p-2.5 text-sm focus:outline-none transition-colors ${
+                        formErrors.email ? "border-red-500 focus:border-red-500 text-red-200" : "border-gray-800 focus:border-[#E2B042]"
+                      }`}
                     />
+                    {formErrors.email && (
+                      <p className="text-red-500 text-[10px] mt-1 font-semibold">{formErrors.email}</p>
+                    )}
                   </div>
                 </div>
 
@@ -886,7 +1212,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
         )}
 
         {/* Tab 2: Admin Dashboard */}
-        {activeTab === "admin" && (
+        {mounted && activeTab === "admin" && currentUser && userRole === "admin" && (
           <div className="space-y-8">
             
             {/* Top Cards - Financial Audit */}
@@ -1151,6 +1477,122 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   </div>
                 </div>
 
+                {/* Hub de Homologação de APIs */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                  <h3 className="text-sm font-semibold tracking-wider uppercase text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                    Homologação de APIs (Live Tests)
+                  </h3>
+                  <div className="space-y-4">
+                    {/* Assinafy Test */}
+                    <div className="space-y-2 pb-3 border-b border-gray-800/60">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-200">API Assinafy</span>
+                        {testZapSignResult && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${testZapSignResult.success ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
+                            {testZapSignResult.success ? 'Sucesso' : 'Erro'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[9px] text-gray-400">Gera minuta do contrato e cria documento para assinatura.</p>
+                      <button
+                        onClick={runTestZapSign}
+                        disabled={isTestingZapSign}
+                        className="w-full py-1.5 bg-[#111622] hover:bg-gray-800 border border-gray-700 hover:border-gray-600 disabled:opacity-50 text-white text-[11px] font-semibold rounded transition-all cursor-pointer"
+                      >
+                        {isTestingZapSign ? "Executando..." : "Testar Integração Assinafy"}
+                      </button>
+                      {testZapSignResult && (
+                        <div className="bg-[#111622] p-2 rounded text-[9px] font-mono text-gray-300 break-all space-y-1">
+                          <div><strong>Modo:</strong> {testZapSignResult.mode}</div>
+                          {testZapSignResult.success ? (
+                            <>
+                              <div><strong>Doc ID:</strong> {testZapSignResult.doc_id}</div>
+                              <div><strong>URL:</strong> <a href={testZapSignResult.sign_url} target="_blank" rel="noreferrer" className="text-[#E2B042] hover:underline">{testZapSignResult.sign_url}</a></div>
+                            </>
+                          ) : (
+                            <div className="text-red-400"><strong>Erro:</strong> {testZapSignResult.error}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Asaas Test */}
+                    <div className="space-y-2 pb-3 border-b border-gray-800/60">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-200">API Asaas (Sandbox)</span>
+                        {testAsaasResult && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${testAsaasResult.success ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
+                            {testAsaasResult.success ? 'Sucesso' : 'Erro'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[9px] text-gray-400">Cadastra cliente e cria assinatura de cota de R$ 100,00 no Sandbox.</p>
+                      <button
+                        onClick={runTestAsaas}
+                        disabled={isTestingAsaas}
+                        className="w-full py-1.5 bg-[#111622] hover:bg-gray-800 border border-gray-700 hover:border-gray-600 disabled:opacity-50 text-white text-[11px] font-semibold rounded transition-all cursor-pointer"
+                      >
+                        {isTestingAsaas ? "Executando..." : "Testar Integração Asaas"}
+                      </button>
+                      {testAsaasResult && (
+                        <div className="bg-[#111622] p-2 rounded text-[9px] font-mono text-gray-300 break-all space-y-1">
+                          <div><strong>Modo:</strong> {testAsaasResult.mode}</div>
+                          {testAsaasResult.success ? (
+                            <>
+                              <div><strong>Cliente ID:</strong> {testAsaasResult.customer_id}</div>
+                              <div><strong>Assinatura ID:</strong> {testAsaasResult.subscription_id}</div>
+                            </>
+                          ) : (
+                            <div className="text-red-400"><strong>Erro:</strong> {testAsaasResult.error}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* YouTube Test */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-gray-200">API YouTube (Google Cloud)</span>
+                        {testYoutubeResult && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${testYoutubeResult.success ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-red-950 text-red-400 border border-red-800'}`}>
+                            {testYoutubeResult.success ? 'Sucesso' : 'Erro'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[9px] text-gray-400">Pesquisa vídeos enviados nos últimos 7 dias por ID do Canal.</p>
+                      <div className="flex gap-1">
+                        <input
+                          type="text"
+                          value={testYoutubeChannelId}
+                          onChange={e => setTestYoutubeChannelId(e.target.value)}
+                          placeholder="Channel ID do YouTube"
+                          className="flex-1 bg-[#111622] border border-gray-800 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-[#E2B042]"
+                        />
+                        <button
+                          onClick={runTestYoutube}
+                          disabled={isTestingYoutube}
+                          className="px-3 py-1 bg-[#111622] hover:bg-gray-800 border border-gray-700 hover:border-gray-600 disabled:opacity-50 text-white text-[10px] font-semibold rounded transition-all cursor-pointer"
+                        >
+                          {isTestingYoutube ? "Consultando..." : "Testar"}
+                        </button>
+                      </div>
+                      {testYoutubeResult && (
+                        <div className="bg-[#111622] p-2 rounded text-[9px] font-mono text-gray-300 break-all space-y-1">
+                          <div><strong>Modo:</strong> {testYoutubeResult.mode}</div>
+                          {testYoutubeResult.success ? (
+                            <>
+                              <div><strong>Canal ID:</strong> {testYoutubeResult.channel_id}</div>
+                              <div><strong>Vídeos na Semana:</strong> <span className={testYoutubeResult.uploads_count >= 1 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>{testYoutubeResult.uploads_count}</span></div>
+                            </>
+                          ) : (
+                            <div className="text-red-400"><strong>Erro:</strong> {testYoutubeResult.error}</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Fechamento Mensal Trigger */}
                 <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
                   <h3 className="text-sm font-semibold tracking-wider uppercase text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
@@ -1237,22 +1679,29 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
         )}
 
         {/* Tab 3: Creator Dashboard View */}
-        {activeTab === "creator" && (
+        {mounted && activeTab === "creator" && currentUser && (userRole === "admin" || userRole === "creator") && (
           <div className="space-y-8">
             
             {/* Select creator simulation context */}
-            <div className="flex items-center gap-4 bg-[#1A1D29] p-4 rounded-xl border border-gray-800">
-              <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Visualizar como Criador:</label>
-              <select
-                value={selectedCreatorId}
-                onChange={e => setSelectedCreatorId(e.target.value)}
-                className="bg-[#111622] border border-gray-800 text-white rounded-lg p-2 text-xs focus:border-[#E2B042] focus:outline-none"
-              >
-                {condominos.map(c => (
-                  <option key={c.id} value={c.id}>{c.nome_comercial}</option>
-                ))}
-              </select>
-            </div>
+            {userRole === "admin" ? (
+              <div className="flex items-center gap-4 bg-[#1A1D29] p-4 rounded-xl border border-gray-800">
+                <label className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Visualizar como Criador:</label>
+                <select
+                  value={selectedCreatorId}
+                  onChange={e => setSelectedCreatorId(e.target.value)}
+                  className="bg-[#111622] border border-gray-800 text-white rounded-lg p-2 text-xs focus:border-[#E2B042] focus:outline-none"
+                >
+                  {condominos.map(c => (
+                    <option key={c.id} value={c.id}>{c.nome_comercial}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 bg-[#1A1D29] p-4 rounded-xl border border-gray-800">
+                <span className="text-xs text-gray-400 uppercase tracking-wider font-semibold">Perfil do Criador:</span>
+                <span className="text-xs text-white font-bold">{associatedCreator?.nome_comercial}</span>
+              </div>
+            )}
 
             {(() => {
               const current = condominos.find(c => c.id === selectedCreatorId);
@@ -1461,3 +1910,55 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
     </div>
   );
 }
+
+function isValidCpf(cpf: string): boolean {
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(cpf.charAt(i)) * (10 - i);
+  let rev = 11 - (sum % 11);
+  if (rev === 10 || rev === 11) rev = 0;
+  if (rev !== parseInt(cpf.charAt(9))) return false;
+
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(cpf.charAt(i)) * (11 - i);
+  rev = 11 - (sum % 11);
+  if (rev === 10 || rev === 11) rev = 0;
+  if (rev !== parseInt(cpf.charAt(10))) return false;
+
+  return true;
+}
+
+function isValidCnpj(cnpj: string): boolean {
+  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
+
+  let size = cnpj.length - 2;
+  let numbers = cnpj.substring(0, size);
+  const digits = cnpj.substring(size);
+  let sum = 0;
+  let pos = size - 7;
+  for (let i = size; i >= 1; i--) {
+    sum += parseInt(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+  let result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+  if (result !== parseInt(digits.charAt(0))) return false;
+
+  size = size + 1;
+  numbers = cleanCnpjOrCpf(cnpj).substring(0, size); // helper to get digits only
+  sum = 0;
+  pos = size - 7;
+  for (let i = size; i >= 1; i--) {
+    sum += parseInt(numbers.charAt(size - i)) * pos--;
+    if (pos < 2) pos = 9;
+  }
+  result = sum % 11 < 2 ? 0 : 11 - (sum % 11);
+  if (result !== parseInt(digits.charAt(1))) return false;
+
+  return true;
+}
+
+function cleanCnpjOrCpf(val: string): string {
+  return val.replace(/\D/g, "");
+}
+
