@@ -853,9 +853,11 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
       {/* Mystical Header */}
       <header className="border-b border-[#E2B042]/20 py-4 px-6 md:px-12 flex flex-col md:flex-row justify-between items-center bg-[#1A1D29]/75 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-3 mb-4 md:mb-0">
-          <div className="h-10 w-10 rounded-full border border-[#E2B042] flex items-center justify-center bg-[#111622] text-[#E2B042] font-semibold text-lg mystic-glow">
-            Ω
-          </div>
+          <img
+            src="/logo.png"
+            alt="Cosmo Alma TV Logo"
+            className="h-10 w-10 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622] mystic-glow"
+          />
           <div>
             <h1 className="text-xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
               COSMO ALMA TV

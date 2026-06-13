@@ -77,9 +77,11 @@ export default function Login() {
         
         {/* Header */}
         <div className="text-center space-y-2">
-          <div className="h-12 w-12 mx-auto rounded-full border border-[#E2B042] flex items-center justify-center bg-[#111622] text-[#E2B042] font-semibold text-xl shadow-[0_0_15px_rgba(226,176,66,0.3)]">
-            Ω
-          </div>
+          <img
+            src="/logo.png"
+            alt="Cosmo Alma TV Logo"
+            className="h-12 w-12 mx-auto object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622] shadow-[0_0_15px_rgba(226,176,66,0.3)] animate-pulse"
+          />
           <h1 className="text-2xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
             COSMO ALMA TV
           </h1>
