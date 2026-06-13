@@ -120,6 +120,67 @@ export default function EgrégoraCMS() {
   const [generatedContractText, setGeneratedContractText] = useState<string>("");
   const [isOnboardingCompleted, setIsOnboardingCompleted] = useState<boolean>(false);
   const [formErrors, setFormErrors] = useState<{ email?: string; cnpj_cpf?: string }>({});
+  const [portalConfigs, setPortalConfigs] = useState({
+    whatsapp_link: "https://chat.whatsapp.com/C7nExemploGrupo",
+    onboarding_video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    production_guidelines: "1. Frequência: Publique entre 1 a 3 vídeos por semana para manter o engajamento algorítmico.\n2. Qualidade: Vídeos em formato 16:9, resolução mínima 1080p, áudio limpo e sem ruídos.\n3. Identidade Visual: Utilize as vinhetas oficiais fornecidas na biblioteca do canal.",
+    support_contact: "Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo"
+  });
+  const [editConfigs, setEditConfigs] = useState({
+    whatsapp_link: "",
+    onboarding_video_url: "",
+    production_guidelines: "",
+    support_contact: ""
+  });
+  const [isSavingConfigs, setIsSavingConfigs] = useState(false);
+
+  useEffect(() => {
+    setEditConfigs(portalConfigs);
+  }, [portalConfigs]);
+
+  const fetchConfigs = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/configs`);
+      if (res.ok) {
+        const data = await res.json();
+        setPortalConfigs(data);
+      }
+    } catch (err) {
+      console.error("Error fetching configs:", err);
+    }
+  };
+
+  const handleSaveConfigs = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingConfigs(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+
+      const res = await fetch(`${API_BASE_URL}/api/configs`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(editConfigs)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`Erro ao salvar configurações: ${errData.detail || "Erro desconhecido"}`);
+        return;
+      }
+
+      alert("Configurações do portal atualizadas com sucesso!");
+      await fetchConfigs();
+    } catch (err: any) {
+      console.error(err);
+      alert(`Falha ao conectar com a API: ${err.message}`);
+    } finally {
+      setIsSavingConfigs(false);
+    }
+  };
 
   // API Test States
   const [testZapSignResult, setTestZapSignResult] = useState<any>(null);
@@ -371,6 +432,7 @@ export default function EgrégoraCMS() {
 
     fetchCondominos();
     fetchFechamentos();
+    fetchConfigs();
 
     const savedLogs = localStorage.getItem("egregora_logs");
     if (savedLogs) {
@@ -965,6 +1027,29 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     Inscrição e Onboarding Cósmico
                   </h2>
                   <p className="text-xs text-gray-400 mt-1">Preencha seus dados para geração e assinatura do Contrato V2</p>
+                </div>
+
+                <div className="bg-[#1A1D29]/60 border border-purple-900/30 p-5 rounded-xl text-xs text-gray-300 leading-relaxed mb-6">
+                  <h3 className="text-[#E2B042] font-semibold text-sm mb-2 flex items-center gap-1.5">
+                    ✨ Bem-vindo ao portal da Egrégora Cosmo Alma TV!
+                  </h3>
+                  <p className="mb-3">
+                    Estamos felizes em ter você como parceiro do nosso condomínio audiovisual. O processo de onboarding é simples, rápido e composto por 3 etapas principais:
+                  </p>
+                  <ul className="space-y-2 list-none pl-0">
+                    <li className="flex items-start gap-2">
+                      <span className="text-[#E2B042] font-bold">1. Cadastro:</span>
+                      <span>Preencha o formulário abaixo com as informações do seu canal e dados para faturamento.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-[#E2B042] font-bold">2. Assinatura:</span>
+                      <span>Assine o contrato de parceria digitalmente pelo **Assinafy** (o link será gerado imediatamente após o cadastro).</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-[#E2B042] font-bold">3. Ativação:</span>
+                      <span>Realize o primeiro pagamento da cota de condomínio via Pix ou boleto no painel do Asaas para liberar seu acesso à comunidade e repasses de AdSense.</span>
+                    </li>
+                  </ul>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1684,6 +1769,81 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
             </div>
 
+            {/* Configurações Globais do Portal (Admin settings) */}
+            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow mt-8">
+              <h3 className="text-base font-bold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)] mb-4">
+                ⚙️ Configurações Globais do Onboarding (Criadores)
+              </h3>
+              <form onSubmit={handleSaveConfigs} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      Link de Convite do WhatsApp
+                    </label>
+                    <input
+                      type="url"
+                      required
+                      placeholder="https://chat.whatsapp.com/..."
+                      value={editConfigs.whatsapp_link}
+                      onChange={e => setEditConfigs({ ...editConfigs, whatsapp_link: e.target.value })}
+                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      Link do Vídeo do YouTube (Boas-Vindas/Treinamento)
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      value={editConfigs.onboarding_video_url}
+                      onChange={e => setEditConfigs({ ...editConfigs, onboarding_video_url: e.target.value })}
+                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      Diretrizes e Rotina de Produção
+                    </label>
+                    <textarea
+                      rows={4}
+                      required
+                      placeholder="Explicite as diretrizes de produção de vídeo (uma por linha)..."
+                      value={editConfigs.production_guidelines}
+                      onChange={e => setEditConfigs({ ...editConfigs, production_guidelines: e.target.value })}
+                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors font-mono leading-relaxed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      Informações de Contato / Suporte
+                    </label>
+                    <textarea
+                      rows={4}
+                      required
+                      placeholder="Indique os contatos de suporte de forma clara..."
+                      value={editConfigs.support_contact}
+                      onChange={e => setEditConfigs({ ...editConfigs, support_contact: e.target.value })}
+                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors font-mono leading-relaxed"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSavingConfigs}
+                    className="px-6 py-2.5 bg-[#E2B042] hover:bg-[#D69E2E] disabled:bg-gray-800 text-black font-bold rounded-lg text-xs tracking-wider uppercase transition-all shadow-[0_4px_12px_rgba(226,176,66,0.15)] cursor-pointer"
+                  >
+                    {isSavingConfigs ? "Salvando..." : "💾 Salvar Configurações Globais"}
+                  </button>
+                </div>
+              </form>
+            </div>
+
           </div>
         )}
 
@@ -1822,6 +1982,66 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                           <span className="font-mono text-green-400">
                             R$ {isEligible ? valuePerEligible.toFixed(2) : "0,00"}
                           </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Guia de Integração e Onboarding do Criador */}
+                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
+                      <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                        🚀 Manual de Onboarding e Treinamento do Criador
+                      </h4>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Onboarding Video Embed */}
+                        <div className="space-y-3">
+                          <h5 className="text-xs uppercase text-gray-400 font-semibold">Vídeo de Instrução / Boas-Vindas</h5>
+                          {getYouTubeEmbedUrl(portalConfigs.onboarding_video_url) ? (
+                            <div className="relative pb-[56.25%] h-0 rounded-lg overflow-hidden border border-gray-800 bg-black">
+                              <iframe
+                                className="absolute top-0 left-0 w-full h-full"
+                                src={getYouTubeEmbedUrl(portalConfigs.onboarding_video_url) || ""}
+                                title="Vídeo de Integração Cosmo Alma TV"
+                                frameBorder="0"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                              ></iframe>
+                            </div>
+                          ) : (
+                            <div className="bg-[#111622] rounded-lg p-6 border border-gray-800 flex flex-col items-center justify-center text-center h-[180px]">
+                              <span className="text-2xl mb-2">📹</span>
+                              <p className="text-[11px] text-gray-500">Nenhum vídeo explicativo cadastrado no momento.</p>
+                            </div>
+                          )}
+                          
+                          {/* Comunidade Whatsapp Button */}
+                          <div className="pt-2">
+                            <a
+                              href={portalConfigs.whatsapp_link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-bold rounded-lg text-xs tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(226,176,66,0.15)] cursor-pointer"
+                            >
+                              💬 Entrar na Comunidade Oficial do WhatsApp
+                            </a>
+                          </div>
+                        </div>
+
+                        {/* Onboarding Guidelines & Support */}
+                        <div className="space-y-4 flex flex-col justify-between">
+                          <div className="space-y-2">
+                            <h5 className="text-xs uppercase text-gray-400 font-semibold">Diretrizes e Rotina de Produção</h5>
+                            <div className="bg-[#111622] rounded-lg p-4 border border-gray-800 text-xs text-gray-300 space-y-2 max-h-[190px] overflow-y-auto leading-relaxed">
+                              {portalConfigs.production_guidelines.split("\n").map((line, idx) => (
+                                <p key={idx}>{line}</p>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="bg-purple-950/20 border border-purple-500/20 rounded-lg p-4 text-xs text-purple-300">
+                            <h6 className="font-semibold mb-1">🛎️ Suporte Cosmo Alma TV:</h6>
+                            <p className="text-[11px] text-gray-400 whitespace-pre-wrap">{portalConfigs.support_contact}</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1969,5 +2189,15 @@ function isValidCnpj(cnpj: string): boolean {
 
 function cleanCnpjOrCpf(val: string): string {
   return val.replace(/\D/g, "");
+}
+
+function getYouTubeEmbedUrl(url: string): string | null {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  if (match && match[2].length === 11) {
+    return `https://www.youtube.com/embed/${match[2]}`;
+  }
+  return null;
 }
 

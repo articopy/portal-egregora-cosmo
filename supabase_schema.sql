@@ -71,3 +71,26 @@ CREATE POLICY "Allow all public read" ON public.fechamentos_financeiros FOR SELE
 CREATE POLICY "Allow all public insert" ON public.fechamentos_financeiros FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow all public update" ON public.fechamentos_financeiros FOR UPDATE USING (true);
 CREATE POLICY "Allow all public delete" ON public.fechamentos_financeiros FOR DELETE USING (true);
+
+-- 4. Tabela de Configurações Globais do Portal
+CREATE TABLE IF NOT EXISTS public.portal_configs (
+    key VARCHAR(255) PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.portal_configs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all public read" ON public.portal_configs FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.portal_configs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.portal_configs FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.portal_configs FOR DELETE USING (true);
+
+-- Inserir dados padrão iniciais
+INSERT INTO public.portal_configs (key, value) VALUES
+('whatsapp_link', 'https://chat.whatsapp.com/C7nExemploGrupo'),
+('onboarding_video_url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+('production_guidelines', '1. Frequência: Publique entre 1 a 3 vídeos por semana para manter o engajamento algorítmico.\n2. Qualidade: Vídeos em formato 16:9, resolução mínima 1080p, áudio limpo e sem ruídos.\n3. Identidade Visual: Utilize as vinhetas oficiais fornecidas na biblioteca do canal.'),
+('support_contact', 'Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo')
+ON CONFLICT (key) DO NOTHING;
+
