@@ -1272,10 +1272,10 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">YouTube Channel ID (Opcional)</label>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">ID da Playlist do Criador no YouTube (Opcional)</label>
                     <input
                       type="text"
-                      placeholder="Ex: UC_exemplo123"
+                      placeholder="Ex: PL_exemplo123..."
                       value={formData.youtube_channel_id}
                       onChange={e => setFormData({ ...formData, youtube_channel_id: e.target.value })}
                       className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
@@ -1677,7 +1677,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                           <div><strong>Modo:</strong> {testYoutubeResult.mode}</div>
                           {testYoutubeResult.success ? (
                             <>
-                              <div><strong>Canal ID:</strong> {testYoutubeResult.channel_id}</div>
+                              <div><strong>Playlist ID:</strong> {testYoutubeResult.channel_id}</div>
                               <div><strong>Vídeos na Semana:</strong> <span className={testYoutubeResult.uploads_count >= 1 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>{testYoutubeResult.uploads_count}</span></div>
                             </>
                           ) : (
@@ -1896,7 +1896,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                             {current.nome_comercial}
                           </h3>
                           <p className="text-xs text-gray-400 font-mono mt-1 flex items-center gap-3">
-                            <span>ID Canal: {current.youtube_channel_id}</span>
+                            <span>ID Playlist: {current.youtube_channel_id}</span>
                             <a
                               href={`${API_BASE_URL}/api/condominos/${current.id}/contrato`}
                               target="_blank"
