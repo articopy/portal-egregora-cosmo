@@ -854,7 +854,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
           id: "log-" + Date.now(),
           timestamp: new Date().toLocaleTimeString(),
           tipo: "CONTRATO" as const,
-          mensagem: `Contrato V2 assinado digitalmente por ${signed.nome_comercial}. Minuta DOCX gerada.`
+          mensagem: `Contrato V3 assinado digitalmente por ${signed.nome_comercial}. Minuta DOCX gerada.`
         },
         {
           id: "log-asaas-" + Date.now(),
@@ -1099,7 +1099,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 <div className="text-5xl mb-4">✨</div>
                 <h3 className="text-2xl font-semibold text-[#E2B042] mb-2 font-[family-name:var(--font-josefin-sans)]">Bem-vindo à Egrégora!</h3>
                  <p className="text-sm text-gray-300 mb-4">
-                  Seu cadastro foi recebido com sucesso e o contrato V2 foi assinado digitalmente.
+                  Seu cadastro foi recebido com sucesso e o contrato V3 foi assinado digitalmente.
                   Uma assinatura de cota fixa mensal de R$ 100,00 foi criada no Asaas.
                 </p>
                 
@@ -1176,7 +1176,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
               </div>
             ) : signingContract ? (
               <div>
-                <h3 className="text-lg font-semibold text-[#E2B042] mb-4">Assinatura do Contrato V2 no Assinafy</h3>
+                <h3 className="text-lg font-semibold text-[#E2B042] mb-4">Assinatura do Contrato V3 no Assinafy</h3>
                 <p className="text-xs text-gray-300 mb-4">
                   O contrato oficial da Cosmo Alma TV foi compilado com seus dados e gerado no **Assinafy**. 
                   Clique no botão abaixo para abrir a tela de assinatura e assinar digitalmente.
@@ -1217,7 +1217,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   <h2 className="text-2xl font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
                     Inscrição e Onboarding Cósmico
                   </h2>
-                  <p className="text-xs text-gray-400 mt-1">Preencha seus dados para geração e assinatura do Contrato V2</p>
+                  <p className="text-xs text-gray-400 mt-1">Preencha seus dados para geração e assinatura do Contrato V3</p>
                 </div>
 
                 <div className="bg-[#1A1D29]/60 border border-purple-900/30 p-5 rounded-xl text-xs text-gray-300 leading-relaxed mb-6">
@@ -1479,7 +1479,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     type="submit"
                     className="w-full py-3 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-bold rounded-lg text-sm tracking-wider uppercase transition-all shadow-[0_4px_12px_rgba(226,176,66,0.2)]"
                   >
-                    Gerar Minuta de Contrato V2
+                    Gerar Minuta de Contrato V3
                   </button>
                 </div>
               </form>
@@ -2525,7 +2525,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
       {/* Footer */}
       <footer className="border-t border-[#E2B042]/10 py-6 text-center text-[10px] text-gray-500 bg-[#1A1D29]/50 mt-auto">
         <p>© 2026 Cosmo Alma TV. Todos os direitos reservados à Egrégora de Criadores.</p>
-        <p className="mt-1 text-gray-600">Desenvolvido em conformidade com o Contrato V2 e regulamentos do Asaas/YouTube.</p>
+        <p className="mt-1 text-gray-600">Desenvolvido em conformidade com o Contrato V3 e regulamentos do Asaas/YouTube.</p>
       </footer>
     </div>
   );
