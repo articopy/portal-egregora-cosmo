@@ -3,6 +3,46 @@ import { supabase } from "@/lib/supabase";
 import { generateContractDocxBuffer } from "@/lib/services/contract";
 import { createAssinafyDocument } from "@/lib/services/assinafy";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/auth";
+import { fetchWeeklyUploadsCount } from "@/lib/services/youtube";
+
+// Helper to enrich condomino with weekly video upload counts
+async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publishedAfterStr: string) {
+  if (c.status !== "ATIVO_ADIMPLENTE" && c.status !== "BLOQUEADO_ASSIDUIDADE") {
+    return { ...c, videos_entregues_esta_semana: 0 };
+  }
+
+  // Check database first
+  const { data: delivery } = await supabase
+    .from("entregas_video")
+    .select("qtd_entregue")
+    .eq("condomino_id", c.id)
+    .eq("semana_codigo", semanaCodigo)
+    .maybeSingle();
+
+  if (delivery) {
+    return { ...c, videos_entregues_esta_semana: delivery.qtd_entregue };
+  }
+
+  // If not found in DB, query YouTube live (and cache in DB)
+  try {
+    const youtubeId = c.youtube_id || `mock_chan_${c.nome_comercial.toLowerCase()}`;
+    const uploadsCount = await fetchWeeklyUploadsCount(youtubeId, publishedAfterStr);
+    
+    // Save to DB so it is cached
+    const isValid = uploadsCount >= 1;
+    await supabase.from("entregas_video").insert({
+      condomino_id: c.id,
+      semana_codigo: semanaCodigo,
+      qtd_entregue: uploadsCount,
+      status_valido: isValid,
+    });
+
+    return { ...c, videos_entregues_esta_semana: uploadsCount };
+  } catch (err) {
+    console.error(`Error fetching/caching live uploads for condomino ${c.id}:`, err);
+    return { ...c, videos_entregues_esta_semana: 2 }; // Safe fallback
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -12,6 +52,23 @@ export async function GET(request: Request) {
     }
 
     const isAdmin = isUserAdmin(user);
+
+    // Calculate current ISO week code and date range (last 7 days)
+    const today = new Date();
+    const target = new Date(today.valueOf());
+    const dayNr = (today.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);
+    const firstThursday = target.valueOf();
+    target.setMonth(0, 1);
+    if (target.getDay() !== 4) {
+      target.setMonth(0, 1 + ((4 - target.getDay() + 7) % 7));
+    }
+    const weekNum = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+    const year = today.getFullYear();
+    const semanaCodigo = `${year}-W${String(weekNum).padStart(2, "0")}`;
+
+    const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const publishedAfterStr = sevenDaysAgo.toISOString();
 
     if (isAdmin) {
       const { data: condominos, error } = await supabase
@@ -23,7 +80,11 @@ export async function GET(request: Request) {
         return NextResponse.json({ detail: error.message }, { status: 500 });
       }
 
-      return NextResponse.json(condominos);
+      const enriched = await Promise.all(
+        condominos.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
+      );
+
+      return NextResponse.json(enriched);
     } else {
       // Se for condômino, retorna apenas o seu próprio registro em formato de array
       const { data: condominos, error } = await supabase
@@ -36,7 +97,11 @@ export async function GET(request: Request) {
         return NextResponse.json({ detail: error.message }, { status: 500 });
       }
 
-      return NextResponse.json(condominos);
+      const enriched = await Promise.all(
+        condominos.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
+      );
+
+      return NextResponse.json(enriched);
     }
   } catch (err: any) {
     return NextResponse.json({ detail: err.message }, { status: 500 });

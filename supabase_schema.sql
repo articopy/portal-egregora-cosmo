@@ -91,6 +91,7 @@ INSERT INTO public.portal_configs (key, value) VALUES
 ('whatsapp_link', 'https://chat.whatsapp.com/C7nExemploGrupo'),
 ('onboarding_video_url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
 ('production_guidelines', '1. Frequência: Publique entre 1 a 3 vídeos por semana para manter o engajamento algorítmico.\n2. Qualidade: Vídeos em formato 16:9, resolução mínima 1080p, áudio limpo e sem ruídos.\n3. Identidade Visual: Utilize as vinhetas oficiais fornecidas na biblioteca do canal.'),
-('support_contact', 'Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo')
+('support_contact', 'Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo'),
+('youtube_channel_id', 'UCEI3LDmVQceZpC0zagt398Q')
 ON CONFLICT (key) DO NOTHING;
 

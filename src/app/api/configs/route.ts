@@ -7,6 +7,7 @@ const DEFAULT_CONFIGS = {
   onboarding_video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   production_guidelines: "1. Frequência: Publique entre 1 a 3 vídeos por semana para manter o engajamento algorítmico.\n2. Qualidade: Vídeos em formato 16:9, resolução mínima 1080p, áudio limpo e sem ruídos.\n3. Identidade Visual: Utilize as vinhetas oficiais fornecidas na biblioteca do canal.",
   support_contact: "Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo",
+  youtube_channel_id: "UCEI3LDmVQceZpC0zagt398Q",
 };
 
 export async function GET() {
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    const keys = ["whatsapp_link", "onboarding_video_url", "production_guidelines", "support_contact"];
+    const keys = ["whatsapp_link", "onboarding_video_url", "production_guidelines", "support_contact", "youtube_channel_id"];
     
     for (const key of keys) {
       if (body[key] !== undefined) {

@@ -6,7 +6,7 @@ export async function POST() {
     const testData = {
       nome: "Condômino Teste Asaas Sandbox",
       email: "teste-asaas@cosmoalmatv.com.br",
-      cnpj_cpf: "123.456.789-10"
+      cnpj_cpf: "005.635.977-20"
     };
 
     // 1. Create client in Asaas
@@ -38,13 +38,17 @@ export async function POST() {
     }
 
     const isMock = !process.env.ASAAS_API_KEY;
+    const isProduction = process.env.ASAAS_API_URL?.includes("api.asaas.com");
+    const mode = isMock 
+      ? "Simulação (Chave de API ausente)" 
+      : (isProduction ? "Asaas Produção" : "Asaas Sandbox");
 
     return NextResponse.json({
       success: true,
-      mode: isMock ? "Simulação (Chave de API ausente)" : "Asaas Sandbox",
+      mode,
       customer_id: customerId,
       subscription_id: subscriptionId,
-      message: "Integração Asaas testada com sucesso! Cliente e Assinatura criados."
+      message: `Integração Asaas testada com sucesso! Cliente e Assinatura criados no modo: ${mode}.`
     });
   } catch (err: any) {
     console.error("[Test Asaas] Endpoint error:", err);

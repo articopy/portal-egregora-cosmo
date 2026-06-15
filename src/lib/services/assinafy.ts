@@ -65,66 +65,74 @@ export async function createAssinafyDocument(
     throw new Error(`Assinafy Upload response does not contain a document ID: ${JSON.stringify(uploadData)}`);
   }
 
-  // 3. Create Signer in workspace
-  console.log(`[Assinafy] Creating signer: ${nomeCompleto} (${email})`);
-  const signerRes = await fetch(`${ASSINAFY_API_URL}/accounts/${ASSINAFY_ACCOUNT_ID}/signers`, {
-    method: "POST",
-    headers: {
-      "X-Api-Key": ASSINAFY_API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      full_name: nomeCompleto,
-      email: email,
-    }),
-  });
+  // 3. Helper to create or get signer
+  const getOrCreateSigner = async (name: string, emailAddr: string): Promise<string> => {
+    console.log(`[Assinafy] Getting or creating signer: ${name} (${emailAddr})`);
+    const signerRes = await fetch(`${ASSINAFY_API_URL}/accounts/${ASSINAFY_ACCOUNT_ID}/signers`, {
+      method: "POST",
+      headers: {
+        "X-Api-Key": ASSINAFY_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        full_name: name,
+        email: emailAddr,
+      }),
+    });
 
-  let signerId = "";
+    let sId = "";
 
-  if (!signerRes.ok) {
-    const errorText = await signerRes.text();
-    let isAlreadyExists = false;
-    try {
-      const errJson = JSON.parse(errorText);
-      if (errJson.message && errJson.message.toLowerCase().includes("já existe")) {
-        isAlreadyExists = true;
-      }
-    } catch (_) {}
+    if (!signerRes.ok) {
+      const errorText = await signerRes.text();
+      let isAlreadyExists = false;
+      try {
+        const errJson = JSON.parse(errorText);
+        if (errJson.message && errJson.message.toLowerCase().includes("já existe")) {
+          isAlreadyExists = true;
+        }
+      } catch (_) {}
 
-    if (isAlreadyExists) {
-      console.log(`[Assinafy] Signer with email ${email} already exists. Searching to reuse ID...`);
-      const searchRes = await fetch(`${ASSINAFY_API_URL}/accounts/${ASSINAFY_ACCOUNT_ID}/signers?search=${encodeURIComponent(email)}`, {
-        method: "GET",
-        headers: {
-          "X-Api-Key": ASSINAFY_API_KEY,
-        },
-      });
-      if (searchRes.ok) {
-        const searchData = await searchRes.json();
-        const list = searchData.data || [];
-        const matchedSigner = list.find((s: any) => s.email && s.email.toLowerCase() === email.toLowerCase());
-        if (matchedSigner) {
-          signerId = matchedSigner.id;
-          console.log(`[Assinafy] Reusing existing signer ID: ${signerId}`);
+      if (isAlreadyExists) {
+        console.log(`[Assinafy] Signer with email ${emailAddr} already exists. Searching to reuse ID...`);
+        const searchRes = await fetch(`${ASSINAFY_API_URL}/accounts/${ASSINAFY_ACCOUNT_ID}/signers?search=${encodeURIComponent(emailAddr)}`, {
+          method: "GET",
+          headers: {
+            "X-Api-Key": ASSINAFY_API_KEY,
+          },
+        });
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          const list = searchData.data || [];
+          const matchedSigner = list.find((s: any) => s.email && s.email.toLowerCase() === emailAddr.toLowerCase());
+          if (matchedSigner) {
+            sId = matchedSigner.id;
+            console.log(`[Assinafy] Reusing existing signer ID: ${sId}`);
+          }
         }
       }
+
+      if (!sId) {
+        throw new Error(`Assinafy Signer Creation Error: ${errorText}`);
+      }
+    } else {
+      const signerData = await signerRes.json();
+      const signerObj = signerData.data || signerData;
+      sId = signerObj.id;
     }
 
-    if (!signerId) {
-      throw new Error(`Assinafy Signer Creation Error: ${errorText}`);
+    if (!sId) {
+      throw new Error(`Assinafy Signer response does not contain a signer ID.`);
     }
-  } else {
-    const signerData = await signerRes.json();
-    const signerObj = signerData.data || signerData;
-    signerId = signerObj.id;
-  }
 
-  if (!signerId) {
-    throw new Error(`Assinafy Signer response does not contain a signer ID.`);
-  }
+    return sId;
+  };
+
+  // Get both Signer IDs
+  const creatorSignerId = await getOrCreateSigner(nomeCompleto, email);
+  const repSignerId = await getOrCreateSigner("Alexandre Parreira Bernabé", "alexandre.tjk@gmail.com");
 
   // 4. Request Signatures (Assignment)
-  console.log(`[Assinafy] Requesting signature (assignment) for document ${documentId}`);
+  console.log(`[Assinafy] Requesting signature (assignment) for document ${documentId} with signers: ${creatorSignerId}, ${repSignerId}`);
   const assignmentRes = await fetch(`${ASSINAFY_API_URL}/documents/${documentId}/assignments`, {
     method: "POST",
     headers: {
@@ -133,7 +141,7 @@ export async function createAssinafyDocument(
     },
     body: JSON.stringify({
       method: "virtual",
-      signerIds: [signerId],
+      signerIds: [creatorSignerId, repSignerId],
     }),
   });
 
@@ -145,9 +153,9 @@ export async function createAssinafyDocument(
   const assignmentData = await assignmentRes.json();
   const assignObj = assignmentData.data || assignmentData;
   
-  // Extract signing URL
+  // Extract signing URL for the Creator specifically
   const signingUrls = assignObj.signing_urls || assignObj.assignment?.signing_urls || [];
-  const signingUrlObj = signingUrls.find((u: any) => u.signer_id === signerId) || signingUrls[0];
+  const signingUrlObj = signingUrls.find((u: any) => u.signer_id === creatorSignerId) || signingUrls[0];
   const signUrl = signingUrlObj?.url || "";
 
   if (!signUrl) {

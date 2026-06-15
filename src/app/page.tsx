@@ -93,6 +93,66 @@ export default function EgrégoraCMS() {
   const [closingMonth, setClosingMonth] = useState<string>("2026-06");
   const [closingAdsense, setClosingAdsense] = useState<string>("5000");
 
+  // YouTube Stats State
+  const [youtubeStats, setYoutubeStats] = useState<{
+    subscriberCount: number;
+    viewCount: number;
+    videoCount: number;
+    title: string;
+    thumbnail: string;
+    isMock: boolean;
+    apiError?: string;
+  } | null>(null);
+
+  const fetchYoutubeStats = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) {
+        console.warn("Nenhum token de autenticação encontrado para carregar estatísticas do YouTube.");
+        return;
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/youtube-stats`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setYoutubeStats(data);
+      } else {
+        console.warn("API returned error status, using simulated fallback on client.");
+        let errMsg = `Código HTTP ${res.status}`;
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errData.message || errMsg;
+        } catch (_) {}
+        
+        setYoutubeStats({
+          subscriberCount: 850,
+          viewCount: 45000,
+          videoCount: 45,
+          title: "Cosmo Alma TV (Erro Fallback)",
+          thumbnail: "",
+          isMock: true,
+          apiError: errMsg
+        });
+      }
+    } catch (err: any) {
+      console.error("Erro ao carregar estatísticas do YouTube, usando fallback:", err);
+      setYoutubeStats({
+        subscriberCount: 850,
+        viewCount: 45000,
+        videoCount: 45,
+        title: "Cosmo Alma TV (Erro Fallback)",
+        thumbnail: "",
+        isMock: true,
+        apiError: err.message || "Erro de rede"
+      });
+    }
+  };
+
   // Onboarding Form State
   const [formData, setFormData] = useState({
     nome_completo: "",
@@ -124,13 +184,15 @@ export default function EgrégoraCMS() {
     whatsapp_link: "https://chat.whatsapp.com/C7nExemploGrupo",
     onboarding_video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     production_guidelines: "1. Frequência: Publique entre 1 a 3 vídeos por semana para manter o engajamento algorítmico.\n2. Qualidade: Vídeos em formato 16:9, resolução mínima 1080p, áudio limpo e sem ruídos.\n3. Identidade Visual: Utilize as vinhetas oficiais fornecidas na biblioteca do canal.",
-    support_contact: "Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo"
+    support_contact: "Contato direto: suporte@cosmoalmatv.com.br ou pelo Telegram @SuporteCosmo",
+    youtube_channel_id: "UCEI3LDmVQceZpC0zagt398Q"
   });
   const [editConfigs, setEditConfigs] = useState({
     whatsapp_link: "",
     onboarding_video_url: "",
     production_guidelines: "",
-    support_contact: ""
+    support_contact: "",
+    youtube_channel_id: ""
   });
   const [isSavingConfigs, setIsSavingConfigs] = useState(false);
 
@@ -304,7 +366,7 @@ export default function EgrégoraCMS() {
           zapsign_sign_url: c.zapsign_sign_url || "",
           chave_pix: c.chave_pix || "",
           data_onboarding: c.data_onboarding,
-          videos_entregues_esta_semana: c.status === "ATIVO_ADIMPLENTE" ? 2 : 0,
+          videos_entregues_esta_semana: typeof c.videos_entregues_esta_semana === "number" ? c.videos_entregues_esta_semana : (c.status === "ATIVO_ADIMPLENTE" ? 2 : 0),
           receita_adsense_gerada: c.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
         }));
         setCondominos(mapped);
@@ -382,7 +444,7 @@ export default function EgrégoraCMS() {
               zapsign_sign_url: match.zapsign_sign_url || "",
               chave_pix: match.chave_pix || "",
               data_onboarding: match.data_onboarding,
-              videos_entregues_esta_semana: match.status === "ATIVO_ADIMPLENTE" ? 2 : 0,
+              videos_entregues_esta_semana: typeof match.videos_entregues_esta_semana === "number" ? match.videos_entregues_esta_semana : (match.status === "ATIVO_ADIMPLENTE" ? 2 : 0),
               receita_adsense_gerada: match.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
             });
           }
@@ -433,6 +495,7 @@ export default function EgrégoraCMS() {
     fetchCondominos();
     fetchFechamentos();
     fetchConfigs();
+    fetchYoutubeStats();
 
     const savedLogs = localStorage.getItem("egregora_logs");
     if (savedLogs) {
@@ -865,9 +928,9 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
   // Financial Split calculation (70/30) based on the latest closed month or manual simulation state
   const latestFechamento = fechamentos.length > 0 ? fechamentos[0] : null;
-  const currentAdsenseInput = parseFloat(closingAdsense) || 0;
-
-  const totalAdsense = latestFechamento ? latestFechamento.receita_bruta_adsense : currentAdsenseInput;
+  
+  // Real adsense should start at 0 if no fechamento is done yet
+  const totalAdsense = latestFechamento ? latestFechamento.receita_bruta_adsense : 0;
   const retencao30 = latestFechamento ? latestFechamento.retencao_adm_30 : totalAdsense * 0.30;
   const fundoPartilha70 = latestFechamento ? latestFechamento.fundo_partilha_70 : totalAdsense * 0.70;
 
@@ -875,6 +938,45 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
   const splitEligibleCondominos = condominos.filter(c => c.status_operacional === "ATIVO_ADIMPLENTE");
   const countEligible = latestFechamento ? latestFechamento.qtd_condominos_ativos : splitEligibleCondominos.length;
   const valuePerEligible = latestFechamento ? latestFechamento.valor_por_condomino : (countEligible > 0 ? fundoPartilha70 / countEligible : 0);
+
+  // Dynamic Chart points from real fechamentos data
+  const chartFechamentos = [...fechamentos].reverse().slice(-6);
+  const maxAdsenseVal = Math.max(...fechamentos.map(f => f.receita_bruta_adsense), 1000);
+  
+  const getChartPoints = () => {
+    if (chartFechamentos.length === 0) {
+      return {
+        pathD: "M 20 130 L 380 130",
+        fillD: "M 20 130 L 380 130 L 380 150 L 20 150 Z",
+        points: []
+      };
+    }
+    if (chartFechamentos.length === 1) {
+      const y = 130 - (chartFechamentos[0].receita_bruta_adsense / maxAdsenseVal) * 100;
+      return {
+        pathD: `M 20 ${y} L 380 ${y}`,
+        fillD: `M 20 ${y} L 380 ${y} L 380 150 L 20 150 Z`,
+        points: [
+          { x: 20, y, val: chartFechamentos[0].receita_bruta_adsense },
+          { x: 380, y, val: chartFechamentos[0].receita_bruta_adsense }
+        ]
+      };
+    }
+    const pts = chartFechamentos.map((f, i) => {
+      const x = 20 + i * (360 / (chartFechamentos.length - 1));
+      const y = 130 - (f.receita_bruta_adsense / maxAdsenseVal) * 100;
+      return { x, y, val: f.receita_bruta_adsense, label: f.mes_referencia };
+    });
+    
+    let pathD = `M ${pts[0].x} ${pts[0].y}`;
+    for (let i = 1; i < pts.length; i++) {
+      pathD += ` L ${pts[i].x} ${pts[i].y}`;
+    }
+    const fillD = `${pathD} L ${pts[pts.length - 1].x} 150 L ${pts[0].x} 150 Z`;
+    return { pathD, fillD, points: pts };
+  };
+
+  const chartData = getChartPoints();
 
   return (
     <div className="min-h-screen bg-[#111622] nebula-gradient flex flex-col font-sans">
@@ -984,10 +1086,50 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
               <div className="text-center py-8">
                 <div className="text-5xl mb-4">✨</div>
                 <h3 className="text-2xl font-semibold text-[#E2B042] mb-2 font-[family-name:var(--font-josefin-sans)]">Bem-vindo à Egrégora!</h3>
-                <p className="text-sm text-gray-300 mb-6">
+                 <p className="text-sm text-gray-300 mb-4">
                   Seu cadastro foi recebido com sucesso e o contrato V2 foi assinado digitalmente.
                   Uma assinatura de cota fixa mensal de R$ 100,00 foi criada no Asaas.
                 </p>
+                
+                <div className="bg-[#111622] border border-purple-500/30 p-5 rounded-xl mb-6 text-left space-y-3">
+                  <h4 className="text-[#E2B042] text-xs font-bold uppercase tracking-wider">Próximo Passo para Acessar seu Painel:</h4>
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Para acessar seu painel de controle e acompanhar seu faturamento, você precisará efetuar login no sistema usando o e-mail cadastrado (<strong>{formData.email}</strong>).
+                  </p>
+                  <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                    <button
+                      onClick={async () => {
+                        const condominoEmail = formData.email;
+                        if (!condominoEmail) {
+                          alert("E-mail não informado.");
+                          return;
+                        }
+                        try {
+                          const { error } = await supabase.auth.signInWithOtp({
+                            email: condominoEmail,
+                            options: {
+                              emailRedirectTo: `${window.location.origin}/`,
+                            },
+                          });
+                          if (error) throw error;
+                          alert(`Link de acesso mágico enviado para ${condominoEmail}! Verifique sua caixa de entrada.`);
+                        } catch (err: any) {
+                          alert(`Erro ao enviar link de acesso: ${err.message}`);
+                        }
+                      }}
+                      className="px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      📧 Receber Link de Acesso por E-mail
+                    </button>
+                    <a
+                      href="/login"
+                      className="px-4 py-2.5 border border-gray-700 hover:bg-[#1A1D29] text-gray-300 rounded-lg text-xs font-bold text-center transition-all flex items-center justify-center"
+                    >
+                      Ir para Login
+                    </a>
+                  </div>
+                </div>
+
                 <div className="mb-6">
                   <a
                     href={`${API_BASE_URL}/api/condominos/${selectedCreatorId}/contrato`}
@@ -1000,14 +1142,21 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 </div>
                 <div className="flex justify-center gap-4">
                   <button
-                    onClick={() => setActiveTab("creator")}
-                    className="px-6 py-2 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-semibold rounded-lg text-sm transition-all"
+                    onClick={() => {
+                      if (!currentUser) {
+                        alert("Por favor, faça login com o link de acesso enviado para seu e-mail para visualizar seu painel.");
+                        router.push("/login");
+                      } else {
+                        setActiveTab("creator");
+                      }
+                    }}
+                    className="px-6 py-2.5 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-semibold rounded-lg text-sm transition-all cursor-pointer"
                   >
                     Acessar Painel do Criador
                   </button>
                   <button
                     onClick={() => setIsOnboardingCompleted(false)}
-                    className="px-6 py-2 border border-gray-600 rounded-lg text-sm hover:bg-[#111622] transition-all"
+                    className="px-6 py-2.5 border border-gray-600 rounded-lg text-sm hover:bg-[#111622] transition-all cursor-pointer"
                   >
                     Nova Inscrição
                   </button>
@@ -1362,59 +1511,245 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
               </div>
             </div>
 
+            {/* YouTube Channel Stats & Monetization Countdown */}
+            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow space-y-4">
+              <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                    Métricas em Tempo Real do Canal (Cosmo Alma TV)
+                  </h3>
+                  <p className="text-[10px] text-gray-500">
+                    Sincronizado via YouTube API v3 • ID: {portalConfigs.youtube_channel_id}
+                  </p>
+                  {youtubeStats?.apiError && (
+                    <span className="inline-block mt-1 text-[10px] text-red-400 bg-red-950/30 border border-red-500/30 px-2 py-1 rounded-md max-w-md">
+                      ⚠️ Erro de API: {youtubeStats.apiError}. (Usando fallback de simulação)
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={fetchYoutubeStats}
+                  className="px-3 py-1.5 border border-purple-500/30 hover:bg-purple-950/20 text-purple-300 text-[10px] font-bold rounded-lg uppercase transition-all cursor-pointer"
+                >
+                  🔄 Atualizar Dados
+                </button>
+              </div>
+
+              {youtubeStats ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Stats counters */}
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-[#111622] p-3 rounded-lg border border-gray-850">
+                        <span className="text-[9px] uppercase tracking-wider text-gray-400 block mb-0.5">Inscritos</span>
+                        <span className="text-xl font-bold text-white font-mono">
+                          {youtubeStats.subscriberCount.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="bg-[#111622] p-3 rounded-lg border border-gray-850">
+                        <span className="text-[9px] uppercase tracking-wider text-gray-400 block mb-0.5">Visualizações</span>
+                        <span className="text-xl font-bold text-white font-mono">
+                          {youtubeStats.viewCount.toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bg-[#111622] p-3 rounded-lg border border-gray-850">
+                      <span className="text-[9px] uppercase tracking-wider text-gray-400 block mb-0.5">Vídeos Postados</span>
+                      <span className="text-xl font-bold text-white font-mono">
+                        {youtubeStats.videoCount.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Countdown Progress Card */}
+                  <div className="md:col-span-2 bg-[#111622] p-4 rounded-lg border border-purple-500/20 space-y-4 flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-center border-b border-gray-800/60 pb-2 mb-3">
+                        <span className="text-[11px] uppercase font-bold text-[#E2B042]">Jornada de Monetização (YPP)</span>
+                        <span className="text-[10px] bg-purple-950/40 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-mono">
+                          Requisitos Google Atualizados
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Tier 1: Apoio de Fãs (Acesso Antecipado) */}
+                        <div className="bg-[#161B29] p-3 rounded-lg border border-gray-850 space-y-2.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-gray-200 uppercase">1. Apoio de Fãs</span>
+                            <span className="text-[9px] font-mono text-[#E2B042]">
+                              {Math.min(100, Math.round(((youtubeStats.subscriberCount >= 500 ? 1 : youtubeStats.subscriberCount / 500) * 0.5 + (youtubeStats.videoCount >= 3 ? 1 : youtubeStats.videoCount / 3) * 0.5) * 100))}%
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-2 text-[11px]">
+                            {/* Subs requirement */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-gray-400">
+                                <span>Inscritos: {youtubeStats.subscriberCount}/500</span>
+                                <span>{youtubeStats.subscriberCount >= 500 ? "✅" : "⚠️"}</span>
+                              </div>
+                              <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-purple-500 h-1.5 rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, (youtubeStats.subscriberCount / 500) * 100)}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            {/* Videos requirement */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-gray-400">
+                                <span>Vídeos públicos (90 dias): {youtubeStats.videoCount}/3</span>
+                                <span>{youtubeStats.videoCount >= 3 ? "✅" : "⚠️"}</span>
+                              </div>
+                              <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-purple-500 h-1.5 rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, (youtubeStats.videoCount / 3) * 100)}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            {/* Engagement requirement */}
+                            <div className="text-[10px] text-gray-400 border-t border-gray-800 pt-1.5 space-y-1">
+                              <span className="block font-semibold text-gray-300">Engajamento (Um dos dois):</span>
+                              <p className="flex items-center gap-1 text-[9px]">
+                                <span>⚠️</span>
+                                <span>3.000 horas públicas (12 meses)</span>
+                              </p>
+                              <p className="flex items-center gap-1 text-[9px]">
+                                <span>⚠️</span>
+                                <span>3M de views no Shorts (90 dias)</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Tier 2: Receita de Anúncios (Parceria Completa) */}
+                        <div className="bg-[#161B29] p-3 rounded-lg border border-gray-850 space-y-2.5">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-bold text-gray-200 uppercase">2. Receitas de Anúncios</span>
+                            <span className="text-[9px] font-mono text-[#E2B042]">
+                              {Math.min(100, Math.round((youtubeStats.subscriberCount / 1000) * 100))}%
+                            </span>
+                          </div>
+                          
+                          <div className="space-y-2 text-[11px]">
+                            {/* Subs requirement */}
+                            <div className="space-y-1">
+                              <div className="flex justify-between text-[10px] text-gray-400">
+                                <span>Inscritos: {youtubeStats.subscriberCount}/1.000</span>
+                                <span>{youtubeStats.subscriberCount >= 1000 ? "✅" : "⚠️"}</span>
+                              </div>
+                              <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-purple-500 to-[#E2B042] h-1.5 rounded-full transition-all"
+                                  style={{ width: `${Math.min(100, (youtubeStats.subscriberCount / 1000) * 100)}%` }}
+                                ></div>
+                              </div>
+                            </div>
+
+                            {/* Engagement requirement */}
+                            <div className="text-[10px] text-gray-400 border-t border-gray-800 pt-1.5 space-y-1 mt-6">
+                              <span className="block font-semibold text-gray-300">Engajamento (Um dos dois):</span>
+                              <p className="flex items-center gap-1 text-[9px]">
+                                <span>⚠️</span>
+                                <span>4.000 horas públicas (12 meses)</span>
+                              </p>
+                              <p className="flex items-center gap-1 text-[9px]">
+                                <span>⚠️</span>
+                                <span>10M de views no Shorts (90 dias)</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-[9px] text-gray-500 italic pt-2 border-t border-gray-800 flex justify-between">
+                      <span>* Nota: O canal no momento não está monetizado, logo o AdSense bruto acumulado é R$ 0,00.</span>
+                      <span>Horas/Shorts devem ser acompanhados no YouTube Studio.</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6 text-xs text-gray-400 font-mono">
+                  Carregando estatísticas do canal do YouTube...
+                </div>
+              )}
+            </div>
+
             {/* SVG Charts Section */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Chart 1: AdSense Revenue */}
-              <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow space-y-3">
+              <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow space-y-3 relative overflow-hidden">
                 <div className="flex justify-between items-center">
                   <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
                     Histórico Faturamento AdSense
                   </h4>
                   <span className="text-[10px] text-gray-500 font-mono">Últimos 6 meses</span>
                 </div>
-                <div className="h-44 w-full flex items-end pt-4">
-                  <svg className="w-full h-full" viewBox="0 0 400 150">
-                    {/* Grid lines */}
+                
+                <div className="h-44 w-full flex items-center justify-center relative pt-4">
+                  {/* Background Grid lines */}
+                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 400 150">
                     <line x1="0" y1="20" x2="400" y2="20" stroke="rgba(255,255,255,0.05)" strokeDasharray="3" />
                     <line x1="0" y1="60" x2="400" y2="60" stroke="rgba(255,255,255,0.05)" strokeDasharray="3" />
                     <line x1="0" y1="100" x2="400" y2="100" stroke="rgba(255,255,255,0.05)" strokeDasharray="3" />
-                    {/* Graph Line */}
-                    <path
-                      d="M 20 120 Q 80 100, 140 85 T 260 55 T 380 25"
-                      fill="none"
-                      stroke="#E2B042"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                    />
-                    {/* Glow effect under the line */}
-                    <path
-                      d="M 20 120 Q 80 100, 140 85 T 260 55 T 380 25 L 380 150 L 20 150 Z"
-                      fill="url(#adsenseGlow)"
-                      opacity="0.1"
-                    />
-                    {/* Dots at data points */}
-                    <circle cx="20" cy="120" r="4" fill="#E2B042" />
-                    <circle cx="100" cy="102" r="4" fill="#E2B042" />
-                    <circle cx="180" cy="78" r="4" fill="#E2B042" />
-                    <circle cx="260" cy="55" r="4" fill="#E2B042" />
-                    <circle cx="340" cy="38" r="4" fill="#E2B042" />
-                    <circle cx="380" cy="25" r="4" fill="#E2B042" />
-                    {/* Define Gradient */}
-                    <defs>
-                      <linearGradient id="adsenseGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#E2B042" />
-                        <stop offset="100%" stopColor="transparent" />
-                      </linearGradient>
-                    </defs>
                   </svg>
+
+                  {fechamentos.length > 0 && fechamentos.some(f => f.receita_bruta_adsense > 0) ? (
+                    <svg className="w-full h-full relative z-10" viewBox="0 0 400 150">
+                      {/* Graph Line */}
+                      <path
+                        d={chartData.pathD}
+                        fill="none"
+                        stroke="#E2B042"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                      />
+                      {/* Glow effect under the line */}
+                      <path
+                        d={chartData.fillD}
+                        fill="url(#adsenseGlow)"
+                        opacity="0.1"
+                      />
+                      {/* Dots at data points */}
+                      {chartData.points.map((pt: any, idx: number) => (
+                        <circle key={idx} cx={pt.x} cy={pt.y} r="4" fill="#E2B042" />
+                      ))}
+                      {/* Define Gradient */}
+                      <defs>
+                        <linearGradient id="adsenseGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#E2B042" />
+                          <stop offset="100%" stopColor="transparent" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  ) : (
+                    <div className="relative z-10 flex flex-col items-center justify-center text-center space-y-2 p-4 bg-[#111622]/85 border border-purple-500/10 rounded-lg backdrop-blur-sm mx-auto max-w-[280px] shadow-[0_0_20px_rgba(123,31,162,0.1)]">
+                      <div className="w-8 h-8 rounded-full bg-purple-950/50 border border-[#E2B042]/30 flex items-center justify-center text-[#E2B042] animate-pulse">
+                        🔒
+                      </div>
+                      <div>
+                        <h5 className="text-[11px] font-bold text-gray-200 uppercase">Aguardando Monetização</h5>
+                        <p className="text-[9px] text-gray-400 mt-1 leading-relaxed">
+                          O gráfico de receitas será desbloqueado quando o canal for aprovado no YPP e registrar o primeiro faturamento.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <div className="flex justify-between text-[9px] text-gray-500 font-mono">
-                  <span>Jan (R$ 4.2k)</span>
-                  <span>Fev</span>
-                  <span>Mar</span>
-                  <span>Abr</span>
-                  <span>Mai</span>
-                  <span>Jun (R$ 10.2k)</span>
+                  {fechamentos.length > 0 && fechamentos.some(f => f.receita_bruta_adsense > 0) ? (
+                    chartData.points.map((pt: any, idx: number) => (
+                      <span key={idx}>{pt.label} (R$ {pt.val.toLocaleString()})</span>
+                    ))
+                  ) : (
+                    <span className="w-full text-center text-[10px] text-gray-500/80">
+                      Nenhum fechamento faturado registrado ainda (Canal não monetizado)
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1806,7 +2141,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 ⚙️ Configurações Globais do Onboarding (Criadores)
               </h3>
               <form onSubmit={handleSaveConfigs} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
                       Link de Convite do WhatsApp
@@ -1822,13 +2157,26 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
-                      Link do Vídeo do YouTube (Boas-Vindas/Treinamento)
+                      Link do Vídeo do YouTube (Boas-Vindas)
                     </label>
                     <input
                       type="url"
                       placeholder="https://www.youtube.com/watch?v=..."
                       value={editConfigs.onboarding_video_url}
                       onChange={e => setEditConfigs({ ...editConfigs, onboarding_video_url: e.target.value })}
+                      className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                      ID do Canal Cosmo Alma TV (YouTube)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ex: UC..."
+                      value={editConfigs.youtube_channel_id}
+                      onChange={e => setEditConfigs({ ...editConfigs, youtube_channel_id: e.target.value })}
                       className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-xs focus:border-[#E2B042] focus:outline-none text-white transition-colors"
                     />
                   </div>
