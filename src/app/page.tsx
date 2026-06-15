@@ -783,24 +783,36 @@ export default function EgrégoraCMS() {
       const created = await res.json();
 
       const contractText = `
-CONTRATO DE PARCERIA E CONDOMÍNIO AUDIOVISUAL V2 - COSMO ALMA TV
+CONTRATO DE PARTICIPAÇÃO NA COSMO ALMA TV
+FORMATO DE CONDOMÍNIO AUDIOVISUAL — VERSÃO REVISADA V3
 ------------------------------------------------------------------
-CONTRATADA: COSMO ALMA TV LTDA
-CONTRATANTE: ${created.razao_social}
+CONDOMÍNIO: COSMO ALMA TV
+CONDÔMINO: ${created.razao_social || created.nome_completo}
 NOME COMERCIAL: ${created.nome_comercial}
 CPF/CNPJ: ${created.cnpj_cpf}
 E-MAIL: ${created.email}
-PIX: ${created.chave_pix}
-CANAL ID: ${created.youtube_id}
+CHAVE PIX: ${created.chave_pix}
+PLAYLIST ID/YOUTUBE ID: ${created.youtube_id || "Não definido"}
 
-CLÁUSULA 9ª - O CONDOMÍNIO AUDIOVISUAL
-A contratante compromete-se ao repasse mensal de taxa de cota fixa operacional no valor de R$ 100,00 (cem reais) com vencimento recorrente todo dia 10.
+CLÁUSULA 2ª - ESTRUTURA DE RECEITAS E RETENÇÃO ADMINISTRATIVA
+- Retenção Compulsória de 30% para a Administração (Taxa de Gestão e Operação).
+- Fundo de Partilha Mútua de 70% dividido em partes iguais entre condôminos ativos e assíduos.
+- Taxas condominiais de R$ 100,00, infoprodutos e agenciamento constituem receitas exclusivas da administração.
+
+CLÁUSULA 9ª - A TAXA DE CONDOMÍNIO FIXA
+O CONDÔMINO compromete-se ao repasse mensal de cota fixa de R$ 100,00 (cem reais) com vencimento impreterivelmente até o dia 10 de cada mês.
 
 CLÁUSULA 10ª - A ASSIDUIDADE DE CONTEÚDO
-Para a correta tração algorítmica da grade, a contratante compromete-se a publicar entre 1 e 3 vídeos semanais no canal.
+O CONDÔMINO compromete-se a cumprir o cronograma enviando de 1 (um) a 3 (três) vídeos por semana. O direito ao rateio do Fundo de Partilha (70%) fica condicionado a este envio.
 
-CLÁUSULA 11ª - PENALIDADE POR INADIMPLÊNCIA E INASSIDUIDADE
-O atraso superior a 10 (dez) dias corridos na cota fixa resultará na imediata alteração de status para SUSPENSO_INADIMPLENCIA, travando repasses de AdSense. A inobservância da assiduidade sem justificativa resultará em BLOQUEADO_ASSIDUIDADE, excluindo o parceiro do rateio da partilha 70/30 no mês correspondente.
+CLÁUSULA 11ª - GATILHO DE SUSPENSÃO POR INADIMPLÊNCIA
+O atraso superior a 10 (dez) dias corridos na taxa de condomínio implicará na suspensão imediata dos serviços de edição, bloqueio de postagens e retenção de quaisquer repasses.
+
+CLÁUSULA 12ª - PROPRIEDADE INTELECTUAL E BLINDAGEM DO ACERVO
+Todo conteúdo audiovisual publicado no canal da Cosmo Alma TV deverá permanecer no acervo ativo do projeto pelo prazo mínimo e ininterrupto de 2 (dois) anos, persistindo inclusive após término ou rescisão.
+
+CLÁUSULA 13ª - CARÊNCIA E FIDELIDADE
+O contrato tem vigência de 6 (seis) meses, com carência e fidelidade obrigatória de 6 (seis) meses para o pagamento da taxa condominial.
 
 ASSINADO ELETRONICAMENTE POR AMBAS AS PARTES.
 IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}

@@ -3,7 +3,7 @@ import path from "path";
 import PizZip from "pizzip";
 
 // We will look for the template in the root of the project
-const TEMPLATE_RELATIVE_PATH = "Contrato/CONTRATO_COSMO_ALMA_TV_V2.docx";
+const TEMPLATE_RELATIVE_PATH = "Contrato/CONTRATO_COSMO_ALMA_TV_V3.docx";
 
 interface ContractData {
   nomeCompleto: string;

@@ -1,7 +1,7 @@
 import os
 import docx
 
-TEMPLATE_PATH = r"c:\Projetos\Cosmo Alma TV\portal-egregora\Contrato\CONTRATO_COSMO_ALMA_TV_V2.docx"
+TEMPLATE_PATH = r"c:\Projetos\Cosmo Alma TV\portal-egregora\Contrato\CONTRATO_COSMO_ALMA_TV_V3.docx"
 OUTPUT_DIR = r"c:\Projetos\Cosmo Alma TV\portal-egregora\backend\generated_contracts"
 
 def generate_contract_docx(
@@ -40,17 +40,23 @@ def generate_contract_docx(
     # Address block
     address_str = f"{endereco or ''}, {cidade or ''} - {uf or ''}, CEP {cep or ''}, {pais or 'Brasil'}"
 
-    # Replacements dictionary
+    # Determine tags
+    clean_doc = "".join([c for c in cnpj_cpf if c.isdigit()])
+    is_cnpj = len(clean_doc) > 11
+    tipo_pessoa = "jurídica" if is_cnpj else "física"
+    cpf_ou_cnpj = "CNPJ" if is_cnpj else "CPF"
+    nome_parte = razao_social or nome_completo
+
+    # Replacements dictionary based on V3 bracketed placeholders
     replacements = {
-        "PARADOXO CASA ATELIÊ": nome_comercial.upper(),
-        "49.759.501/0001-45": cnpj_cpf,
-        "MANY XAVIER DE BRITO E SOUZA BERNABÊ": nome_completo.upper(),
-        "MANY XAVIER DE BRITO E SOUZA BERNABÉ": nome_completo.upper(),
-        "Many Xavier de B. e S. Bernabé": nome_completo,
-        "789.620.807-53": cnpj_cpf,
-        "brasileira": nacionalidade,
-        "casada": (estado_civil or "solteiro(a)").lower(),
-        "Avenida Edson Passos, nº 87, sobrado, Usina, Rio de Janeiro, RJ": address_str,
+        "[nome PESSOA FISICA OU JURÍDICA]": nome_parte.upper(),
+        "[física/jurídica]": tipo_pessoa,
+        "[CPF/CNPJ]": cpf_ou_cnpj,
+        "[número cpf OU cnpj]": cnpj_cpf,
+        "[NOME]": nome_completo.upper(),
+        "[ESTADO civil]": (estado_civil or "solteiro(a)").lower(),
+        "[CPF]": cnpj_cpf,
+        "[ENDEREÇO]": address_str,
     }
 
     # Helper function to replace text in runs while preserving style
