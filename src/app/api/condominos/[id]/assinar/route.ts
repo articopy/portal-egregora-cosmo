@@ -32,7 +32,8 @@ export async function POST(
       const asaasCustomerId = await createCustomer(
         condomino.nome_completo,
         condomino.email,
-        condomino.cnpj_cpf
+        condomino.cnpj_cpf,
+        condomino.telefone
       );
 
       // 2. Create monthly subscription of R$ 100

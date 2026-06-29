@@ -9,6 +9,7 @@ class CondominoBase(BaseModel):
     razao_social: Optional[str] = None
     cnpj_cpf: str
     email: EmailStr
+    telefone: Optional[str] = None
     youtube_id: Optional[str] = None
     chave_pix: Optional[str] = None
     genero: Optional[str] = None

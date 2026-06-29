@@ -12,6 +12,7 @@ interface Condomino {
   razao_social: string;
   cnpj_cpf: string;
   email: string;
+  telefone?: string;
   status_operacional: "AGUARDANDO_ASSINATURA" | "ATIVO_PENDENTE_PAGAMENTO" | "ATIVO_ADIMPLENTE" | "SUSPENSO_INADIMPLENCIA" | "BLOQUEADO_ASSIDUIDADE";
   youtube_channel_id: string;
   asaas_customer_id: string;
@@ -104,6 +105,77 @@ export default function EgrégoraCMS() {
     apiError?: string;
   } | null>(null);
 
+  // Creator Performance Data State
+  const [performanceData, setPerformanceData] = useState<any>(null);
+  const [loadingPerformance, setLoadingPerformance] = useState<boolean>(false);
+  const [creatorSubTab, setCreatorSubTab] = useState<"gerais" | "cosmica" | "onboarding">("gerais");
+
+  const [pixQrCode, setPixQrCode] = useState<any>(null);
+  const [loadingPixQr, setLoadingPixQr] = useState<boolean>(false);
+
+  const fetchPixQrCode = async (creatorId: string) => {
+    if (!creatorId) return;
+    setLoadingPixQr(true);
+    setPixQrCode(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/condominos/${creatorId}/pix-qr`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPixQrCode(data);
+      } else {
+        console.error("Erro ao carregar Pix QR Code");
+      }
+    } catch (err) {
+      console.error("Erro ao obter Pix QR Code:", err);
+    } finally {
+      setLoadingPixQr(false);
+    }
+  };
+
+  const fetchPerformanceData = async (creatorId: string) => {
+    if (!creatorId) return;
+    setLoadingPerformance(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/condominos/${creatorId}/performance`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPerformanceData(data);
+      } else {
+        console.error("Erro ao carregar dados de performance");
+      }
+    } catch (err) {
+      console.error("Erro ao obter dados de performance:", err);
+    } finally {
+      setLoadingPerformance(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedCreatorId) {
+      fetchPerformanceData(selectedCreatorId);
+      const current = condominos.find(c => c.id === selectedCreatorId);
+      if (current && (current.status_operacional === "ATIVO_PENDENTE_PAGAMENTO" || current.status_operacional === "SUSPENSO_INADIMPLENCIA")) {
+        fetchPixQrCode(selectedCreatorId);
+      }
+    }
+  }, [selectedCreatorId, condominos]);
+
   const fetchYoutubeStats = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -160,6 +232,7 @@ export default function EgrégoraCMS() {
     razao_social: "",
     cnpj_cpf: "",
     email: "",
+    telefone: "",
     youtube_channel_id: "",
     chave_pix: "",
     currentCreatedId: "",
@@ -179,7 +252,68 @@ export default function EgrégoraCMS() {
   const [signingContract, setSigningContract] = useState<boolean>(false);
   const [generatedContractText, setGeneratedContractText] = useState<string>("");
   const [isOnboardingCompleted, setIsOnboardingCompleted] = useState<boolean>(false);
-  const [formErrors, setFormErrors] = useState<{ email?: string; cnpj_cpf?: string }>({});
+  const [formErrors, setFormErrors] = useState<{ email?: string; cnpj_cpf?: string; telefone?: string }>({});
+  
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+
+  const turnstileContainerRef = React.useRef<HTMLDivElement>(null);
+  const turnstileWidgetId = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isOnboardingCompleted || signingContract) {
+      turnstileWidgetId.current = null;
+      setTurnstileToken(null);
+      return;
+    }
+
+    let active = true;
+
+    const renderTurnstile = () => {
+      if (!active) return;
+      const container = turnstileContainerRef.current;
+      if (!container) return;
+
+      if (typeof window !== "undefined" && (window as any).turnstile) {
+        try {
+          container.innerHTML = "";
+          const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "0x4AAAAAADsKeZPzqYxHSqGd";
+          
+          turnstileWidgetId.current = (window as any).turnstile.render(container, {
+            sitekey: siteKey,
+            callback: (token: string) => {
+              setTurnstileToken(token);
+            },
+            "expired-callback": () => {
+              setTurnstileToken(null);
+            },
+            "error-callback": (err: any) => {
+              console.error("Turnstile error:", err);
+              setTurnstileToken(null);
+            },
+          });
+        } catch (err) {
+          console.error("Error rendering Turnstile:", err);
+        }
+      } else {
+        setTimeout(renderTurnstile, 500);
+      }
+    };
+
+    const timer = setTimeout(renderTurnstile, 100);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      if (turnstileWidgetId.current && typeof window !== "undefined" && (window as any).turnstile) {
+        try {
+          (window as any).turnstile.remove(turnstileWidgetId.current);
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, [isOnboardingCompleted, signingContract]);
+
   const [portalConfigs, setPortalConfigs] = useState({
     whatsapp_link: "https://chat.whatsapp.com/C7nExemploGrupo",
     onboarding_video_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -367,9 +501,12 @@ export default function EgrégoraCMS() {
           chave_pix: c.chave_pix || "",
           data_onboarding: c.data_onboarding,
           videos_entregues_esta_semana: typeof c.videos_entregues_esta_semana === "number" ? c.videos_entregues_esta_semana : (c.status === "ATIVO_ADIMPLENTE" ? 2 : 0),
-          receita_adsense_gerada: c.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
+          receita_adsense_gerada: 0
         }));
         setCondominos(mapped);
+        if (mapped.length > 0 && !selectedCreatorId) {
+          setSelectedCreatorId(mapped[0].id);
+        }
       } else if (res.status === 401 || res.status === 403) {
         setCondominos([]);
       }
@@ -445,7 +582,7 @@ export default function EgrégoraCMS() {
               chave_pix: match.chave_pix || "",
               data_onboarding: match.data_onboarding,
               videos_entregues_esta_semana: typeof match.videos_entregues_esta_semana === "number" ? match.videos_entregues_esta_semana : (match.status === "ATIVO_ADIMPLENTE" ? 2 : 0),
-              receita_adsense_gerada: match.status === "ATIVO_ADIMPLENTE" ? 1450.00 : 0
+              receita_adsense_gerada: 0
             });
           }
         }
@@ -697,6 +834,18 @@ export default function EgrégoraCMS() {
     return digits;
   };
 
+  const formatTelefone = (value: string) => {
+    const digits = value.replace(/\D/g, "").slice(0, 11);
+    if (digits.length > 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    } else if (digits.length > 6) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    } else if (digits.length > 2) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    }
+    return digits;
+  };
+
   const handleCEPLookup = async (cepValue: string) => {
     const digits = cepValue.replace(/\D/g, "");
     if (digits.length === 8) {
@@ -723,11 +872,17 @@ export default function EgrégoraCMS() {
   const handleOnboardingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const errors: { email?: string; cnpj_cpf?: string } = {};
+    const errors: { email?: string; cnpj_cpf?: string; telefone?: string } = {};
 
     // Validate email format
     if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       errors.email = "Formato de e-mail inválido (ex: exemplo@dominio.com).";
+    }
+
+    // Validate telefone
+    const cleanPhone = (formData.telefone || "").replace(/\D/g, "");
+    if (!cleanPhone || cleanPhone.length < 10) {
+      errors.telefone = "Número de Celular/WhatsApp inválido. Deve conter DDD + número.";
     }
 
     // Validate CPF / CNPJ
@@ -750,6 +905,11 @@ export default function EgrégoraCMS() {
       return;
     }
 
+    if (!turnstileToken) {
+      alert("Por favor, resolva a validação do Captcha antes de enviar.");
+      return;
+    }
+
     setFormErrors({});
 
     try {
@@ -762,6 +922,7 @@ export default function EgrégoraCMS() {
           razao_social: formData.razao_social || null,
           cnpj_cpf: formData.cnpj_cpf,
           email: formData.email,
+          telefone: formData.telefone,
           youtube_id: formData.youtube_channel_id,
           chave_pix: formData.chave_pix,
           genero: formData.genero,
@@ -770,7 +931,8 @@ export default function EgrégoraCMS() {
           endereco: `${formData.endereco}${formData.numero ? ', n° ' + formData.numero : ''}${formData.complemento ? ' - ' + formData.complemento : ''}`,
           cidade: formData.cidade,
           uf: formData.uf,
-          pais: formData.pais
+          pais: formData.pais,
+          turnstileToken
         })
       });
 
@@ -1310,7 +1472,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="block text-[10px] uppercase tracking-wider text-gray-400">CPF / CNPJ</label>
@@ -1369,6 +1531,27 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     />
                     {formErrors.email && (
                       <p className="text-red-500 text-[10px] mt-1 font-semibold">{formErrors.email}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">WhatsApp / Celular</label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="(00) 00000-0000"
+                      value={formData.telefone}
+                      onChange={e => {
+                        setFormData({ ...formData, telefone: formatTelefone(e.target.value) });
+                        if (formErrors.telefone) {
+                          setFormErrors(prev => ({ ...prev, telefone: undefined }));
+                        }
+                      }}
+                      className={`w-full bg-[#111622] border rounded-lg p-2.5 text-sm focus:outline-none transition-colors ${
+                        formErrors.telefone ? "border-red-500 focus:border-red-500 text-red-200" : "border-gray-800 focus:border-[#E2B042]"
+                      }`}
+                    />
+                    {formErrors.telefone && (
+                      <p className="text-red-500 text-[10px] mt-1 font-semibold">{formErrors.telefone}</p>
                     )}
                   </div>
                 </div>
@@ -1472,6 +1655,11 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     onChange={e => setFormData({ ...formData, chave_pix: e.target.value })}
                     className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2.5 text-sm focus:border-[#E2B042] focus:outline-none transition-colors"
                   />
+                </div>
+
+                {/* Cloudflare Turnstile Widget */}
+                <div className="flex justify-center py-2">
+                  <div ref={turnstileContainerRef}></div>
                 </div>
 
                 <div className="pt-4">
@@ -2272,121 +2460,387 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
               const isBlockedAssiduidade = current.status_operacional === "BLOQUEADO_ASSIDUIDADE";
 
               return (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="flex flex-col lg:flex-row gap-8">
                   
-                  {/* Left Column: Status card and financials */}
-                  <div className="lg:col-span-2 space-y-6">
+                  {/* SEÇÕES - BARRA LATERAL (DESKTOP) E SUPERIOR (MOBILE) */}
+                  <div className="w-full lg:w-64 flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 border-b lg:border-b-0 lg:border-r border-gray-800 lg:pr-6 shrink-0 scrollbar-none">
+                    <button
+                      onClick={() => setCreatorSubTab("gerais")}
+                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
+                        creatorSubTab === "gerais"
+                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
+                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
+                      }`}
+                    >
+                      <span className="text-base">📊</span> Dados Gerais
+                    </button>
+                    <button
+                      onClick={() => setCreatorSubTab("cosmica")}
+                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
+                        creatorSubTab === "cosmica"
+                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
+                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
+                      }`}
+                    >
+                      <span className="text-base">🌌</span> Evolução Cósmica
+                    </button>
+                    <button
+                      onClick={() => setCreatorSubTab("onboarding")}
+                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
+                        creatorSubTab === "onboarding"
+                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
+                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
+                      }`}
+                    >
+                      <span className="text-base">🚀</span> Onboarding & Aulas
+                    </button>
+                  </div>
+
+                  {/* ÁREA PRINCIPAL DA SEÇÃO ATIVA */}
+                  <div className="flex-1 min-w-0">
                     
-                    {/* Status banner */}
-                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h3 className="text-2xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#E2B042]">
-                            {current.nome_comercial}
-                          </h3>
-                          <p className="text-xs text-gray-400 font-mono mt-1 flex items-center gap-3">
-                            <span>ID Playlist: {current.youtube_channel_id}</span>
-                            <a
-                              href={`${API_BASE_URL}/api/condominos/${current.id}/contrato`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-[#E2B042] hover:underline flex items-center gap-1 cursor-pointer"
-                            >
-                              📄 Baixar Contrato DOCX
-                            </a>
-                          </p>
+                    {creatorSubTab === "gerais" && (
+                      <div className="space-y-6">
+                        
+                        {/* Status banner e Adimplência */}
+                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h3 className="text-2xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#E2B042]">
+                                {current.nome_comercial}
+                              </h3>
+                              <p className="text-xs text-gray-400 font-mono mt-1 flex items-center gap-3">
+                                <span>ID Playlist: {current.youtube_channel_id}</span>
+                                <a
+                                  href={`${API_BASE_URL}/api/condominos/${current.id}/contrato`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[10px] text-[#E2B042] hover:underline flex items-center gap-1 cursor-pointer"
+                                >
+                                  📄 Contrato
+                                </a>
+                              </p>
+                            </div>
+                            <div>
+                              <span className={`px-3 py-1 border rounded-full text-xs font-bold uppercase tracking-wider ${
+                                isEligible
+                                  ? "border-[#38A169] text-[#38A169] bg-green-950/20"
+                                  : "border-red-500 text-red-500 bg-red-950/20"
+                              }`}>
+                                {current.status_operacional.replace("_", " ")}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Status Warnings */}
+                          {isSuspended && (
+                            <div className="mt-6 p-4 bg-red-950/40 border border-red-500/30 rounded-lg text-xs text-red-200">
+                              <strong>⚠️ Trava de Inadimplência Asaas Ativada (Cláusula 11ª):</strong> 
+                              Sua assinatura de R$ 100,00 está atrasada há mais de 10 dias. Todos os repasses de AdSense e novas postagens estão congelados até a regularização do débito.
+                            </div>
+                          )}
+
+                          {isBlockedAssiduidade && (
+                            <div className="mt-6 p-4 bg-orange-950/40 border border-orange-500/30 rounded-lg text-xs text-orange-200">
+                              <strong>⚠️ Trava de Inassiduidade YouTube Ativada (Cláusula 10ª):</strong>
+                              Você não publicou vídeos na semana correspondente. Você foi suspenso do rateio do Fundo de Partilha (70%) do mês corrente. Retome as postagens para voltar a participar dos próximos fechamentos.
+                            </div>
+                          )}
+
+                          {isEligible && (
+                            <div className="mt-6 p-4 bg-green-950/40 border border-green-500/30 rounded-lg text-xs text-green-200">
+                              <strong>✨ Egrégora Ativa e Alinhada:</strong>
+                              Seu canal está em adimplência financeira e cumprindo a cota algorítmica de posts semanais. Você está elegível para o rateio do Fundo de Partilha.
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <span className={`px-3 py-1 border rounded-full text-xs font-bold uppercase tracking-wider ${
-                            isEligible
-                              ? "border-[#38A169] text-[#38A169] bg-green-950/20"
-                              : "border-red-500 text-red-500 bg-red-950/20"
-                          }`}>
-                            {current.status_operacional.replace("_", " ")}
-                          </span>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          
+                          {/* Termômetro de Assiduidade Semanal */}
+                          <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                              Termômetro de Assiduidade Semanal
+                            </h4>
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 bg-[#111622] h-3.5 rounded-full overflow-hidden border border-gray-800">
+                                <div
+                                  className="bg-gradient-to-r from-yellow-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
+                                  style={{ width: `${Math.min((current.videos_entregues_esta_semana / 3) * 100, 100)}%` }}
+                                ></div>
+                              </div>
+                              <span className="font-mono text-xs font-semibold text-white">
+                                {current.videos_entregues_esta_semana}/3 vídeos
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-gray-400 leading-relaxed">
+                              Meta semanal exigida pelo algoritmo: <strong>mínimo de 1 vídeo</strong> e máximo de 3.
+                            </p>
+                            
+                            <div className="bg-[#111622] p-3 rounded-lg border border-gray-800 text-[10px] space-y-1.5 font-mono">
+                              <div className="flex justify-between">
+                                <span>V1: {current.videos_entregues_esta_semana >= 1 ? "✅ Publicado" : "❌ Pendente"}</span>
+                                <span className="text-gray-500">Semana Corrente</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>V2: {current.videos_entregues_esta_semana >= 2 ? "✅ Publicado" : "⚪ Opcional"}</span>
+                                <span className="text-gray-500">Impulsionamento</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>V3: {current.videos_entregues_esta_semana >= 3 ? "✅ Publicado" : "⚪ Opcional"}</span>
+                                <span className="text-gray-500">Grade Cheia</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Cota Mensal Asaas */}
+                          <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                              Cota Mensal Asaas
+                            </h4>
+
+                            <div className="bg-[#111622] p-4 rounded-lg border border-gray-800 text-center">
+                              <span className="text-[10px] uppercase text-gray-500 block mb-1">Vencimento: Dia 10</span>
+                              <span className="text-2xl font-bold font-mono text-[#E2B042]">R$ 100,00</span>
+                              
+                              {isEligible ? (
+                                <div className="mt-3">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-green-950 text-green-400 border border-green-800">
+                                    Adimplente (Pago)
+                                  </span>
+                                  <p className="text-[9px] text-gray-500 mt-2">Cota condominial regularizada.</p>
+                                </div>
+                              ) : (
+                                <div className="mt-4 space-y-3">
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-red-950 text-red-400 border border-red-800">
+                                    Aguardando Pagamento
+                                  </span>
+                                  
+                                  {loadingPixQr ? (
+                                    <div className="flex flex-col items-center justify-center py-4">
+                                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#E2B042]"></div>
+                                      <span className="text-[10px] text-gray-400 mt-2">Buscando QR Code...</span>
+                                    </div>
+                                  ) : pixQrCode?.success ? (
+                                    <div className="space-y-3">
+                                      <div className="bg-white p-2 rounded-lg inline-block my-2 shadow-[0_4px_12px_rgba(255,255,255,0.05)]">
+                                        <img 
+                                          src={`data:image/png;base64,${pixQrCode.encodedImage}`} 
+                                          alt="Pix QR Code" 
+                                          className="h-32 w-32 object-contain"
+                                        />
+                                      </div>
+                                      
+                                      <div className="space-y-2">
+                                        <button
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(pixQrCode.payload);
+                                            alert("Código Pix Copia e Cola copiado!");
+                                          }}
+                                          className="w-full py-1.5 px-3 bg-[#E2B042]/10 hover:bg-[#E2B042]/20 border border-[#E2B042]/30 text-[#E2B042] text-[10px] font-bold rounded transition-colors uppercase tracking-wider cursor-pointer"
+                                        >
+                                          📋 Copiar Copia e Cola
+                                        </button>
+                                        
+                                        {pixQrCode.invoiceUrl && (
+                                          <a
+                                            href={pixQrCode.invoiceUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="block text-center w-full py-1.5 px-3 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px] font-bold rounded transition-colors uppercase tracking-wider border border-gray-700"
+                                          >
+                                            📄 Ver Fatura no Asaas
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-4 text-gray-500">
+                                      <p className="text-[10px]">{pixQrCode?.detail || "Nenhum pagamento pendente encontrado."}</p>
+                                      <p className="text-[8px] mt-1">Verifique seu e-mail ou o status da sua assinatura no Asaas.</p>
+                                    </div>
+                                  )}
+
+                                  <p className="text-[9px] text-gray-400 pt-2 border-t border-gray-800/40">
+                                    Chave PIX: <code className="text-[#E2B042]">{current.chave_pix || "Chave PIX não cadastrada"}</code>
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
                         </div>
+
+                        {/* Demonstrativo de Receitas e Divisão 70/30 */}
+                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
+                          <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                            Demonstrativo de Receitas e Divisão 70/30
+                          </h4>
+
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
+                              <span className="text-[10px] text-gray-400 block mb-1">AdSense Bruto do Seu Canal</span>
+                              <span className="text-xl font-bold font-mono">
+                                R$ {isEligible ? (totalAdsense / (countEligible || 1)).toFixed(2) : "0,00"}
+                              </span>
+                            </div>
+                            <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
+                              <span className="text-[10px] text-gray-400 block mb-1">Sua Cota do Fundo (70%)</span>
+                              <span className="text-xl font-bold font-mono text-purple-400">
+                                R$ {isEligible ? valuePerEligible.toFixed(2) : "0,00"}
+                              </span>
+                            </div>
+                            <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
+                              <span className="text-[10px] text-gray-400 block mb-1">Sua Taxa Condominial</span>
+                              <span className="text-xl font-bold font-mono text-yellow-400">R$ 100,00</span>
+                            </div>
+                          </div>
+     
+                          <div className="border-t border-gray-800 pt-4 text-xs space-y-2 text-gray-400">
+                            <div className="flex justify-between">
+                              <span>Receita Bruta Total Gerada pelo Canal:</span>
+                              <span className="font-mono text-white">R$ {isEligible ? (totalAdsense / (countEligible || 1)).toFixed(2) : "0,00"}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Desconto Retenção Operacional Adm (30%):</span>
+                              <span className="font-mono text-red-400">- R$ {isEligible ? ((totalAdsense / (countEligible || 1)) * 0.3).toFixed(2) : "0,00"}</span>
+                            </div>
+                            <div className="flex justify-between font-semibold text-white border-t border-gray-800/50 pt-2">
+                              <span>Repasse Proporcional Estimado:</span>
+                              <span className="font-mono text-green-400">
+                                R$ {isEligible ? valuePerEligible.toFixed(2) : "0,00"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
                       </div>
+                    )}
 
-                      {/* Status Warnings */}
-                      {isSuspended && (
-                        <div className="mt-6 p-4 bg-red-950/40 border border-red-500/30 rounded-lg text-xs text-red-200">
-                          <strong>⚠️ Trava de Inadimplência Asaas Ativada (Cláusula 11ª):</strong> 
-                          Sua assinatura de R$ 100,00 está atrasada há mais de 10 dias. Todos os repasses de AdSense e novas postagens estão congelados até a regularização do débito.
-                        </div>
-                      )}
+                    {creatorSubTab === "cosmica" && (
+                      <div className="space-y-6">
+                        {performanceData ? (
+                          <div className="space-y-6">
+                            
+                            {/* Metas de Monetização */}
+                            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                                Metas de Monetização (YouTube 2026)
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Inscritos */}
+                                <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-gray-400">Inscritos</span>
+                                    <span className="font-mono text-white font-bold">{performanceData.inscritos.atual} / {performanceData.inscritos.meta}</span>
+                                  </div>
+                                  <div className="bg-[#1A1D29] h-2.5 rounded-full overflow-hidden border border-gray-800">
+                                    <div
+                                      className="bg-gradient-to-r from-purple-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
+                                      style={{ width: `${Math.min((performanceData.inscritos.atual / performanceData.inscritos.meta) * 100, 100)}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                                {/* Horas */}
+                                <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-gray-400">Horas de Exibição</span>
+                                    <span className="font-mono text-white font-bold">{performanceData.horas.atual}h / {performanceData.horas.meta}h</span>
+                                  </div>
+                                  <div className="bg-[#1A1D29] h-2.5 rounded-full overflow-hidden border border-gray-800">
+                                    <div
+                                      className="bg-gradient-to-r from-purple-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
+                                      style={{ width: `${Math.min((performanceData.horas.atual / performanceData.horas.meta) * 100, 100)}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
 
-                      {isBlockedAssiduidade && (
-                        <div className="mt-6 p-4 bg-orange-950/40 border border-orange-500/30 rounded-lg text-xs text-orange-200">
-                          <strong>⚠️ Trava de Inassiduidade YouTube Ativada (Cláusula 10ª):</strong>
-                          Você não publicou vídeos na semana correspondente. Você foi suspenso do rateio do Fundo de Partilha (70%) do mês corrente. Retome as postagens para voltar a participar dos próximos fechamentos.
-                        </div>
-                      )}
+                            {/* Insights de Conteúdo */}
+                            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
+                              <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                                Evolução Cósmica (Insights do Algoritmo)
+                              </h4>
 
-                      {isEligible && (
-                        <div className="mt-6 p-4 bg-green-950/40 border border-green-500/30 rounded-lg text-xs text-green-200">
-                          <strong>✨ Egrégora Ativa e Alinhada:</strong>
-                          Seu canal está em adimplência financeira e cumprindo a cota algorítmica de posts semanais. Você está elegível para o rateio do Fundo de Partilha.
-                        </div>
-                      )}
-                    </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {Object.keys(performanceData.pilares).length === 0 ? (
+                                  <div className="col-span-1 md:col-span-2 text-center py-10 bg-[#111622] rounded-xl border border-gray-850 text-gray-400 text-xs italic">
+                                    Não há vídeos disponíveis para feedback.
+                                  </div>
+                                ) : (
+                                  Object.entries(performanceData.pilares).map(([key, pilar]: [string, any]) => (
+                                    <div key={key} className="bg-[#111622] p-4 rounded-lg border border-gray-800 space-y-3 relative overflow-hidden flex flex-col justify-between">
+                                      <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                          <h5 className="text-xs uppercase text-white font-bold tracking-wider">{pilar.titulo}</h5>
+                                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                                            pilar.status === "OK" ? "bg-green-950/40 text-green-400 border border-green-800/40" : "bg-red-950/40 text-red-400 border border-red-800/40"
+                                          }`}>
+                                            {pilar.status}
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-gray-400 leading-relaxed mb-3">{pilar.problema}</p>
+                                      </div>
+                                      <div className="border-t border-gray-800/50 pt-2 space-y-1">
+                                        <div className="text-[9px] text-[#E2B042] font-semibold uppercase tracking-wide">💡 Recomendação:</div>
+                                        <p className="text-[11px] text-gray-300 leading-relaxed font-medium mb-2">{pilar.solucao}</p>
+                                        <ul className="list-disc pl-4 text-[10px] text-gray-400 space-y-1">
+                                          {pilar.acoes.map((acao: string, i: number) => (
+                                            <li key={i}>{acao}</li>
+                                          ))}
+                                        </ul>
+                                        {pilar.exemplo && (
+                                          <div className="bg-[#1A1D29]/50 p-2 rounded text-[10px] text-gray-500 italic mt-2">
+                                            <strong>Exemplo:</strong> {pilar.exemplo}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
 
-                    {/* Proportional Extrato */}
-                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
-                      <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                        Demonstrativo de Receitas e Divisão 70/30
-                      </h4>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
-                          <span className="text-[10px] text-gray-400 block mb-1">AdSense Bruto do Seu Canal</span>
-                          <span className="text-xl font-bold font-mono">
-                            R$ {isEligible ? (totalAdsense / (countEligible || 1)).toFixed(2) : "0,00"}
-                          </span>
-                        </div>
-                        <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
-                          <span className="text-[10px] text-gray-400 block mb-1">Sua Cota do Fundo (70%)</span>
-                          <span className="text-xl font-bold font-mono text-purple-400">
-                            R$ {isEligible ? valuePerEligible.toFixed(2) : "0,00"}
-                          </span>
-                          <span className="text-[9px] text-gray-500 block mt-1">
-                            {isEligible ? "Status Adimplente habilitado" : "Bloqueado por inadimplência/assiduidade"}
-                          </span>
-                        </div>
-                        <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
-                          <span className="text-[10px] text-gray-400 block mb-1">Sua Taxa Condominial</span>
-                          <span className="text-xl font-bold font-mono text-yellow-400">R$ 100,00</span>
-                          <span className="text-[9px] text-gray-500 block mt-1">Dia 10 todo mês</span>
-                        </div>
+                          </div>
+                        ) : (
+                          <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl text-center text-gray-500 text-xs">
+                            {loadingPerformance ? "Buscando relatórios cósmicos..." : "Nenhum insight disponível para esta playlist."}
+                          </div>
+                        )}
                       </div>
- 
-                      <div className="border-t border-gray-800 pt-4 text-xs space-y-2 text-gray-400">
-                        <div className="flex justify-between">
-                          <span>Receita Bruta Total Gerada pelo Canal:</span>
-                          <span className="font-mono text-white">R$ {isEligible ? (totalAdsense / (countEligible || 1)).toFixed(2) : "0,00"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Desconto Retenção Operacional Adm (30%):</span>
-                          <span className="font-mono text-red-400">- R$ {isEligible ? ((totalAdsense / (countEligible || 1)) * 0.3).toFixed(2) : "0,00"}</span>
-                        </div>
-                        <div className="flex justify-between font-semibold text-white border-t border-gray-800/50 pt-2">
-                          <span>Repasse Proporcional Estimado:</span>
-                          <span className="font-mono text-green-400">
-                            R$ {isEligible ? valuePerEligible.toFixed(2) : "0,00"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                    )}
 
-                    {/* Guia de Integração e Onboarding do Criador */}
-                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
-                      <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                        🚀 Manual de Onboarding e Treinamento do Criador
-                      </h4>
-
+                    {creatorSubTab === "onboarding" && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Onboarding Video Embed */}
-                        <div className="space-y-3">
-                          <h5 className="text-xs uppercase text-gray-400 font-semibold">Vídeo de Instrução / Boas-Vindas</h5>
+                        
+                        {/* Onboarding Instructions */}
+                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4 flex flex-col justify-between">
+                          <div className="space-y-4">
+                            <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                              🚀 Onboarding e Treinamento
+                            </h4>
+                            <div className="space-y-2">
+                              <h5 className="text-xs uppercase text-gray-400 font-semibold">Diretrizes e Rotina de Produção</h5>
+                              <div className="bg-[#111622] rounded-lg p-4 border border-gray-800 text-xs text-gray-300 space-y-2 max-h-[220px] overflow-y-auto leading-relaxed">
+                                {portalConfigs.production_guidelines.split("\n").map((line, idx) => (
+                                  <p key={idx}>{line}</p>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-purple-950/20 border border-purple-500/20 rounded-lg p-4 text-xs text-purple-300 mt-4">
+                            <h6 className="font-semibold mb-1">🛎️ Suporte Cosmo Alma TV:</h6>
+                            <p className="text-[11px] text-gray-400 whitespace-pre-wrap">{portalConfigs.support_contact}</p>
+                          </div>
+                        </div>
+
+                        {/* Onboarding Videos & Classes */}
+                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                          <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                            📹 Vídeo de Instrução e Aulas
+                          </h4>
                           {getYouTubeEmbedUrl(portalConfigs.onboarding_video_url) ? (
                             <div className="relative pb-[56.25%] h-0 rounded-lg overflow-hidden border border-gray-800 bg-black">
                               <iframe
@@ -2405,7 +2859,6 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                             </div>
                           )}
                           
-                          {/* Comunidade Whatsapp Button */}
                           <div className="pt-2">
                             <a
                               href={portalConfigs.whatsapp_link}
@@ -2413,103 +2866,13 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                               rel="noreferrer"
                               className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-bold rounded-lg text-xs tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(226,176,66,0.15)] cursor-pointer"
                             >
-                              💬 Entrar na Comunidade Oficial do WhatsApp
+                              💬 Acessar Whatsapp da Comunidade
                             </a>
                           </div>
                         </div>
 
-                        {/* Onboarding Guidelines & Support */}
-                        <div className="space-y-4 flex flex-col justify-between">
-                          <div className="space-y-2">
-                            <h5 className="text-xs uppercase text-gray-400 font-semibold">Diretrizes e Rotina de Produção</h5>
-                            <div className="bg-[#111622] rounded-lg p-4 border border-gray-800 text-xs text-gray-300 space-y-2 max-h-[190px] overflow-y-auto leading-relaxed">
-                              {portalConfigs.production_guidelines.split("\n").map((line, idx) => (
-                                <p key={idx}>{line}</p>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="bg-purple-950/20 border border-purple-500/20 rounded-lg p-4 text-xs text-purple-300">
-                            <h6 className="font-semibold mb-1">🛎️ Suporte Cosmo Alma TV:</h6>
-                            <p className="text-[11px] text-gray-400 whitespace-pre-wrap">{portalConfigs.support_contact}</p>
-                          </div>
-                        </div>
                       </div>
-                    </div>
-
-                  </div>
-
-                  {/* Right Column: Weekly Upload checklist & Payments */}
-                  <div className="space-y-6">
-                    
-                    {/* Weekly Performance Termometer */}
-                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                        Termômetro de Assiduidade Semanal
-                      </h4>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-[#111622] h-3.5 rounded-full overflow-hidden border border-gray-800">
-                          <div
-                            className="bg-gradient-to-r from-yellow-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
-                            style={{ width: `${Math.min((current.videos_entregues_esta_semana / 3) * 100, 100)}%` }}
-                          ></div>
-                        </div>
-                        <span className="font-mono text-xs font-semibold text-white">
-                          {current.videos_entregues_esta_semana}/3 vídeos
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 leading-relaxed">
-                        Meta semanal exigida pelo algoritmo do YouTube: <strong>mínimo de 1 vídeo</strong> e máximo de 3.
-                      </p>
-                      
-                      <div className="bg-[#111622] p-3 rounded-lg border border-gray-800 text-[10px] space-y-1.5 font-mono">
-                        <div className="flex justify-between">
-                          <span>V1: {current.videos_entregues_esta_semana >= 1 ? "✅ Publicado" : "❌ Pendente"}</span>
-                          <span className="text-gray-500">Semana Corrente</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>V2: {current.videos_entregues_esta_semana >= 2 ? "✅ Publicado" : "⚪ Opcional"}</span>
-                          <span className="text-gray-500">Impulsionamento</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>V3: {current.videos_entregues_esta_semana >= 3 ? "✅ Publicado" : "⚪ Opcional"}</span>
-                          <span className="text-gray-500">Grade Cheia</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Asaas Payment simulator */}
-                    <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                      <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                        Cota Mensal Asaas
-                      </h4>
-
-                      <div className="bg-[#111622] p-4 rounded-lg border border-gray-800 text-center">
-                        <span className="text-[10px] uppercase text-gray-500 block mb-1">Vencimento: Dia 10</span>
-                        <span className="text-2xl font-bold font-mono text-[#E2B042]">R$ 100,00</span>
-                        
-                        {isEligible ? (
-                          <span className="mt-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-green-950 text-green-400 border border-green-800">
-                            Adimplente (Pago)
-                          </span>
-                        ) : (
-                          <div className="mt-4 space-y-2">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-red-950 text-red-400 border border-red-800">
-                              Aguardando Pagamento
-                            </span>
-                            <div className="bg-white p-2 rounded-lg inline-block my-2">
-                              {/* Simulated QR Code for Pix */}
-                              <div className="h-24 w-24 bg-gray-300 flex items-center justify-center text-[10px] text-black font-mono">
-                                [ PIX QR CODE ]
-                              </div>
-                            </div>
-                            <p className="text-[9px] text-gray-400">
-                              Chave PIX Cadastrada: <code className="text-[#E2B042]">{current.chave_pix}</code>
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    )}
 
                   </div>
 

@@ -28,6 +28,9 @@ export default function RootLayout({
       lang="pt-BR"
       className={`${josefinSans.variable} ${inter.variable} h-full antialiased dark`}
     >
+      <head>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      </head>
       <body className="min-h-full flex flex-col bg-[#111622] text-white selection:bg-[#E2B042] selection:text-black">
         {children}
       </body>

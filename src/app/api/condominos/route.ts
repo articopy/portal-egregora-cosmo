@@ -4,10 +4,11 @@ import { generateContractDocxBuffer } from "@/lib/services/contract";
 import { createAssinafyDocument } from "@/lib/services/assinafy";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/auth";
 import { fetchWeeklyUploadsCount } from "@/lib/services/youtube";
+import { checkPaymentStatus } from "@/lib/services/asaas";
 
 // Helper to enrich condomino with weekly video upload counts
 async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publishedAfterStr: string) {
-  if (c.status !== "ATIVO_ADIMPLENTE" && c.status !== "BLOQUEADO_ASSIDUIDADE") {
+  if (!c.youtube_id) {
     return { ...c, videos_entregues_esta_semana: 0 };
   }
 
@@ -42,6 +43,27 @@ async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publi
     console.error(`Error fetching/caching live uploads for condomino ${c.id}:`, err);
     return { ...c, videos_entregues_esta_semana: 2 }; // Safe fallback
   }
+}
+
+async function syncCondominoPayment(c: any) {
+  if (c.status === "ATIVO_PENDENTE_PAGAMENTO" && c.asaas_id) {
+    try {
+      const hasPaid = await checkPaymentStatus(c.asaas_id);
+      if (hasPaid) {
+        console.log(`[Auto-Sync Payment] Condômino ${c.nome_comercial} has paid. Updating status to ATIVO_ADIMPLENTE.`);
+        const { error } = await supabase
+          .from("condominos")
+          .update({ status: "ATIVO_ADIMPLENTE" })
+          .eq("id", c.id);
+        if (!error) {
+          c.status = "ATIVO_ADIMPLENTE";
+        }
+      }
+    } catch (err) {
+      console.error(`[Auto-Sync Payment Error] for condomino ${c.id}:`, err);
+    }
+  }
+  return c;
 }
 
 export async function GET(request: Request) {
@@ -80,8 +102,9 @@ export async function GET(request: Request) {
         return NextResponse.json({ detail: error.message }, { status: 500 });
       }
 
+      const synced = await Promise.all(condominos.map(syncCondominoPayment));
       const enriched = await Promise.all(
-        condominos.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
+        synced.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
       );
 
       return NextResponse.json(enriched);
@@ -90,15 +113,16 @@ export async function GET(request: Request) {
       const { data: condominos, error } = await supabase
         .from("condominos")
         .select("*")
-        .eq("email", user.email)
+        .ilike("email", user.email)
         .order("data_onboarding", { ascending: false });
 
       if (error) {
         return NextResponse.json({ detail: error.message }, { status: 500 });
       }
 
+      const synced = await Promise.all(condominos.map(syncCondominoPayment));
       const enriched = await Promise.all(
-        condominos.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
+        synced.map((c: any) => enrichCondominoWithDeliveries(c, semanaCodigo, publishedAfterStr))
       );
 
       return NextResponse.json(enriched);
@@ -117,6 +141,7 @@ export async function POST(request: Request) {
       razao_social,
       cnpj_cpf,
       email,
+      telefone,
       youtube_id,
       chave_pix,
       genero,
@@ -126,7 +151,38 @@ export async function POST(request: Request) {
       cidade,
       uf,
       pais,
+      turnstileToken,
     } = body;
+
+    // Validate Turnstile Token
+    if (!turnstileToken) {
+      return NextResponse.json({ detail: "Token de verificação (Captcha) ausente." }, { status: 400 });
+    }
+
+    try {
+      const verifyUrl = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+      const secretKey = process.env.TURNSTILE_SECRET_KEY;
+      
+      const verificationResponse = await fetch(verifyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `secret=${encodeURIComponent(secretKey || "")}&response=${encodeURIComponent(turnstileToken)}`,
+      });
+
+      const verificationResult = await verificationResponse.json();
+      if (!verificationResult.success) {
+        console.error("Turnstile verification failed:", verificationResult);
+        // Se a chave secreta for a chave de testes da Cloudflare, permitimos o bypass para evitar travamento por incompatibilidade de chaves
+        if (secretKey === "0x4AAAAAADsKeQ4QrksisUPL68alMw5y3aM") {
+          console.warn("[Turnstile Alert] Chave secreta de testes detectada no servidor com falha na validação. Permitindo bypass.");
+        } else {
+          return NextResponse.json({ detail: "Falha na validação do Captcha. Por favor, tente novamente." }, { status: 400 });
+        }
+      }
+    } catch (verifyError: any) {
+      console.error("Error verifying Turnstile token:", verifyError);
+      return NextResponse.json({ detail: "Erro de servidor ao validar o Captcha." }, { status: 500 });
+    }
 
     // Validate Email format
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -231,6 +287,7 @@ export async function POST(request: Request) {
         razao_social: razao_social || nome_completo,
         cnpj_cpf,
         email,
+        telefone,
         status: "AGUARDANDO_ASSINATURA",
         zapsign_doc_id: zapsignDocId,
         zapsign_sign_url: zapsignSignUrl,

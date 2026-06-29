@@ -12,7 +12,7 @@ def generate_mock_id(prefix: str) -> str:
     random_str = "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
     return f"{prefix}_{random_str}"
 
-def create_customer(nome: str, email: str, cnpj_cpf: str) -> str:
+def create_customer(nome: str, email: str, cnpj_cpf: str, phone: str = None) -> str:
     """
     Creates a customer in Asaas.
     Returns the customer ID.
@@ -28,10 +28,13 @@ def create_customer(nome: str, email: str, cnpj_cpf: str) -> str:
         "access_token": ASAAS_API_KEY,
         "Content-Type": "application/json"
     }
+    clean_phone = "".join(filter(str.isdigit, phone)) if phone else None
     payload = {
         "name": nome,
         "email": email,
-        "cpfCnpj": cnpj_cpf.replace(".", "").replace("/", "").replace("-", "")
+        "cpfCnpj": cnpj_cpf.replace(".", "").replace("/", "").replace("-", ""),
+        "phone": clean_phone,
+        "mobilePhone": clean_phone
     }
     try:
         response = requests.post(f"{ASAAS_API_URL}/customers", json=payload, headers=headers)

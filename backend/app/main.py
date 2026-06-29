@@ -149,7 +149,8 @@ def sign_contract(condomino_id: str, db: Session = Depends(get_db)):
         customer_id = create_customer(
             nome=db_condomino.nome_completo,
             email=db_condomino.email,
-            cnpj_cpf=db_condomino.cnpj_cpf
+            cnpj_cpf=db_condomino.cnpj_cpf,
+            phone=db_condomino.telefone
         )
         # Create subscription of R$ 100.00
         create_subscription(customer_id=customer_id, value=100.0)

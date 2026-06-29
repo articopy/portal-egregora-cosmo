@@ -21,6 +21,7 @@ class Condomino(Base):
     razao_social = Column(String(255), nullable=True)
     cnpj_cpf = Column(String(20), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    telefone = Column(String(50), nullable=True)
     status = Column(Enum(OperacionalStatus), default=OperacionalStatus.AGUARDANDO_ASSINATURA, nullable=False)
     asaas_id = Column(String(255), nullable=True)
     zapsign_doc_id = Column(String(255), nullable=True)

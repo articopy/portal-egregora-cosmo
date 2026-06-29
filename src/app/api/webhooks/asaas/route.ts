@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (event === "PAYMENT_RECEIVED") {
+    if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED") {
       const { error: updateError } = await supabase
         .from("condominos")
         .update({ status: "ATIVO_ADIMPLENTE" })
