@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { createCustomer, createSubscription } from "@/lib/services/asaas";
+import { sendCreatorSignedNotification } from "@/lib/services/email";
+
 
 export async function POST(request: Request) {
   try {
@@ -103,6 +105,16 @@ export async function POST(request: Request) {
       }
 
       console.log(`[Assinafy Webhook] Successfully activated ${condomino.nome_comercial} to ATIVO_PENDENTE_PAGAMENTO`);
+
+      // Send email notification to administrators (non-blocking)
+      try {
+        await sendCreatorSignedNotification({
+          ...condomino,
+          asaas_id: asaasCustomerId
+        });
+      } catch (mailErr) {
+        console.error("Failed to send creator signed email notification:", mailErr);
+      }
 
       return NextResponse.json({
         status: "success",

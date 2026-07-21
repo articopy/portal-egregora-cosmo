@@ -201,7 +201,7 @@ require('./server.js');
     "tmp"
   ].filter(f => fs.existsSync(path.join(TEMP_DIR, f)));
 
-  const tarCommand = `tar -a -c -f "${ZIP_FILE}" -C "${TEMP_DIR}" ${filesAndFolders.join(" ")}`;
+  const tarCommand = `tar -a -c -f "${ZIP_FILE}" -C "${TEMP_DIR}" ${filesAndFolders.map(f => `"${f}"`).join(" ")}`;
   execSync(tarCommand, { stdio: "inherit" });
 
   // 5. Limpar pasta temporária

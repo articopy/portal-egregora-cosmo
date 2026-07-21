@@ -102,3 +102,84 @@ body {
   animation: nebulaPulse 10s ease-in-out infinite;
 }
 
+/* Print layout optimizations for financial PDF report exporting */
+@media print {
+  body, html, .nebula-gradient, main, div {
+    background: #ffffff !important;
+    color: #1a202c !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  
+  /* Hide interactive components and sidebars during print */
+  aside, 
+  header, 
+  form, 
+  button, 
+  input, 
+  select,
+  .print\:hidden,
+  .absolute.right-4.bottom-4 {
+    display: none !important;
+  }
+  
+  /* Remove flex layout offset of sidebar */
+  .min-h-screen {
+    display: block !important;
+    padding: 0 !important;
+  }
+  
+  .container, main, .space-y-8 {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  
+  /* Convert grid layout to blocks */
+  .grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 15px !important;
+  }
+  
+  .lg\:grid-cols-3 {
+    display: block !important;
+  }
+  
+  .lg\:col-span-2 {
+    width: 100% !important;
+  }
+
+  .bg-\[\#1A1D29\], .bg-\[\#111622\] {
+    background-color: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #1a202c !important;
+  }
+  
+  .text-white, .text-gray-300, .text-gray-400 {
+    color: #2d3748 !important;
+  }
+  
+  .text-\[\#E2B042\] {
+    color: #b2891e !important;
+    font-weight: bold !important;
+  }
+  
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  
+  th, td {
+    border-bottom: 1px solid #cbd5e1 !important;
+    color: #1a202c !important;
+    padding: 8px !important;
+  }
+  
+  tr {
+    page-break-inside: avoid !important;
+  }
+}
+
+

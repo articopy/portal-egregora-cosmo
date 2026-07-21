@@ -5,6 +5,7 @@ import { createAssinafyDocument } from "@/lib/services/assinafy";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/auth";
 import { fetchWeeklyUploadsCount } from "@/lib/services/youtube";
 import { checkPaymentStatus } from "@/lib/services/asaas";
+import { sendCreatorRegisteredNotification } from "@/lib/services/email";
 
 // Helper to enrich condomino with weekly video upload counts
 async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publishedAfterStr: string) {
@@ -12,38 +13,58 @@ async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publi
     return { ...c, videos_entregues_esta_semana: 0 };
   }
 
-  // Check database first
-  const { data: delivery } = await supabase
+  let uploadsCount = 0;
+  let fetchFailed = false;
+
+  // Try to query YouTube live
+  try {
+    const youtubeId = c.youtube_id || `mock_chan_${c.nome_comercial.toLowerCase()}`;
+    uploadsCount = await fetchWeeklyUploadsCount(youtubeId, publishedAfterStr);
+  } catch (err) {
+    console.error(`Error fetching live uploads for condomino ${c.id}:`, err);
+    fetchFailed = true;
+  }
+
+  // Check database for existing delivery record
+  const { data: existingDelivery } = await supabase
     .from("entregas_video")
-    .select("qtd_entregue")
+    .select("*")
     .eq("condomino_id", c.id)
     .eq("semana_codigo", semanaCodigo)
     .maybeSingle();
 
-  if (delivery) {
-    return { ...c, videos_entregues_esta_semana: delivery.qtd_entregue };
+  if (fetchFailed) {
+    // If YouTube fetch failed, use cached count if available, otherwise default to fallback
+    const count = existingDelivery ? existingDelivery.qtd_entregue : 2;
+    return { ...c, videos_entregues_esta_semana: count };
   }
 
-  // If not found in DB, query YouTube live (and cache in DB)
-  try {
-    const youtubeId = c.youtube_id || `mock_chan_${c.nome_comercial.toLowerCase()}`;
-    const uploadsCount = await fetchWeeklyUploadsCount(youtubeId, publishedAfterStr);
-    
+  const isValid = uploadsCount >= 1;
+
+  if (existingDelivery) {
+    // Update existing record with the new live count if changed
+    if (existingDelivery.qtd_entregue !== uploadsCount || existingDelivery.status_valido !== isValid) {
+      await supabase
+        .from("entregas_video")
+        .update({
+          qtd_entregue: uploadsCount,
+          status_valido: isValid,
+        })
+        .eq("id", existingDelivery.id);
+    }
+  } else {
     // Save to DB so it is cached
-    const isValid = uploadsCount >= 1;
     await supabase.from("entregas_video").insert({
       condomino_id: c.id,
       semana_codigo: semanaCodigo,
       qtd_entregue: uploadsCount,
       status_valido: isValid,
     });
-
-    return { ...c, videos_entregues_esta_semana: uploadsCount };
-  } catch (err) {
-    console.error(`Error fetching/caching live uploads for condomino ${c.id}:`, err);
-    return { ...c, videos_entregues_esta_semana: 2 }; // Safe fallback
   }
+
+  return { ...c, videos_entregues_esta_semana: uploadsCount };
 }
+
 
 async function syncCondominoPayment(c: any) {
   if (c.status === "ATIVO_PENDENTE_PAGAMENTO" && c.asaas_id) {
@@ -308,6 +329,13 @@ export async function POST(request: Request) {
     if (insertError) {
       console.error("Database insert error:", insertError);
       return NextResponse.json({ detail: insertError.message }, { status: 500 });
+    }
+
+    // Send email notification to administrators (non-blocking)
+    try {
+      await sendCreatorRegisteredNotification(newCondomino);
+    } catch (mailErr) {
+      console.error("Failed to send creator registration email notification:", mailErr);
     }
 
     return NextResponse.json(newCondomino, { status: 201 });

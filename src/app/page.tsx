@@ -78,16 +78,42 @@ const DEFAULT_CONDOMINOS: Condomino[] = [
 
 export default function EgrégoraCMS() {
   const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "";
-  const [activeTab, setActiveTab] = useState<"onboarding" | "admin" | "creator">("onboarding");
+  const [activeTab, setActiveTab] = useState<"onboarding" | "admin" | "creator" | "financeiro">("onboarding");
   const [mounted, setMounted] = useState(false);
+
+  // Financeiro module states
+  const [transacoes, setTransacoes] = useState<any[]>([]);
+  const [filtroMes, setFiltroMes] = useState<string>(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [financeiroLoading, setFinanceiroLoading] = useState(false);
+  const [novaTransacaoTipo, setNovaTransacaoTipo] = useState<"ENTRADA" | "SAIDA">("SAIDA");
+  const [novaTransacaoDescricao, setNovaTransacaoDescricao] = useState("");
+  const [novaTransacaoValor, setNovaTransacaoValor] = useState("");
+  const [novaTransacaoCategoria, setNovaTransacaoCategoria] = useState("Tráfego Pago");
+  const [novaTransacaoStatus, setNovaTransacaoStatus] = useState<"PAGO" | "PENDENTE">("PAGO");
+  const [novaTransacaoData, setNovaTransacaoData] = useState(() => new Date().toISOString().split("T")[0]);
+  const [novaTransacaoLoading, setNovaTransacaoLoading] = useState(false);
+
+  // Categorias states
+  const [categorias, setCategorias] = useState<any[]>([]);
+  const [isCategoriasModalOpen, setIsCategoriasModalOpen] = useState(false);
+  const [novaCategoriaNome, setNovaCategoriaNome] = useState("");
+  const [novaCategoriaTipo, setNovaCategoriaTipo] = useState<"ENTRADA" | "SAIDA">("SAIDA");
+  const [categoriasLoading, setCategoriasLoading] = useState(false);
+
+
   const [condominos, setCondominos] = useState<Condomino[]>([]);
   const [selectedCreatorId, setSelectedCreatorId] = useState<string>("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const hasLoggedAccess = React.useRef<string | null>(null);
 
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"admin" | "creator" | null>(null);
   const [associatedCreator, setAssociatedCreator] = useState<Condomino | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Fechamentos state
   const [fechamentos, setFechamentos] = useState<any[]>([]);
@@ -181,7 +207,6 @@ export default function EgrégoraCMS() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) {
-        console.warn("Nenhum token de autenticação encontrado para carregar estatísticas do YouTube.");
         return;
       }
 
@@ -537,7 +562,216 @@ export default function EgrégoraCMS() {
     }
   };
 
+  const fetchTransacoes = async (mes?: string) => {
+    try {
+      setFinanceiroLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) {
+        setTransacoes([]);
+        return;
+      }
+      const targetMes = mes !== undefined ? mes : filtroMes;
+      const url = `${API_BASE_URL}/api/admin/financeiro${targetMes ? `?mes=${targetMes}` : ""}`;
+      const res = await fetch(url, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTransacoes(data);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar transações:", err);
+    } finally {
+      setFinanceiroLoading(false);
+    }
+  };
+
+  const handleLaunchTransaction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!novaTransacaoDescricao.trim() || !novaTransacaoValor) {
+      alert("Por favor, preencha todos os campos obrigatórios.");
+      return;
+    }
+    try {
+      setNovaTransacaoLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          tipo: novaTransacaoTipo,
+          descricao: novaTransacaoDescricao,
+          valor: parseFloat(novaTransacaoValor),
+          categoria: novaTransacaoCategoria,
+          status: novaTransacaoStatus,
+          data_transacao: novaTransacaoData
+        })
+      });
+
+      if (res.ok) {
+        setNovaTransacaoDescricao("");
+        setNovaTransacaoValor("");
+        alert("Transação lançada com sucesso!");
+        await fetchTransacoes();
+      } else {
+        const errData = await res.json();
+        alert(`Erro ao lançar transação: ${errData.detail || "Erro desconhecido"}`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao conectar ao servidor para lançar transação.");
+    } finally {
+      setNovaTransacaoLoading(false);
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta transação?")) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      if (res.ok) {
+        alert("Transação excluída com sucesso!");
+        await fetchTransacoes();
+      } else {
+        alert("Erro ao excluir transação.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleTransactionStatus = async (id: string, currentStatus: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const newStatus = currentStatus === "PAGO" ? "PENDENTE" : "PAGO";
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (res.ok) {
+        await fetchTransacoes();
+      } else {
+        alert("Erro ao alterar status da transação.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchCategorias = async () => {
+    try {
+      setCategoriasLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/categorias`, {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCategorias(data);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar categorias:", err);
+    } finally {
+      setCategoriasLoading(false);
+    }
+  };
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!novaCategoriaNome.trim()) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/categorias`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          nome: novaCategoriaNome,
+          tipo: novaCategoriaTipo
+        })
+      });
+
+      if (res.ok) {
+        setNovaCategoriaNome("");
+        alert("Categoria criada com sucesso!");
+        await fetchCategorias();
+      } else {
+        const errData = await res.json();
+        alert(`Erro: ${errData.detail || "Erro ao criar categoria"}`);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta categoria?")) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/categorias/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      if (res.ok) {
+        alert("Categoria excluída!");
+        await fetchCategorias();
+      } else {
+        alert("Erro ao excluir categoria.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+
+
   const determineUserRoleAndCreator = async (user: User) => {
+    console.log("[Egrégora Debug] determineUserRoleAndCreator chamado com usuário:", user.email, "metadata:", user.user_metadata);
     const adminEmails = [
       "admin@portal.cosmoalmatv.com.br",
       "alexandre.p@portal.cosmoalmatv.com.br",
@@ -547,9 +781,29 @@ export default function EgrégoraCMS() {
     const isAdmin = adminEmails.includes(user.email || "") || 
                     user.user_metadata?.role === "admin";
     
+    console.log("[Egrégora Debug] isAdmin:", isAdmin, "hasLoggedAccess.current:", hasLoggedAccess.current);
+
     if (isAdmin) {
       setUserRole("admin");
-      setActiveTab("admin");
+      
+      let initialTab: "onboarding" | "admin" | "creator" = "admin";
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const tab = params.get("tab");
+        if (tab === "admin" || tab === "creator" || tab === "onboarding") {
+          initialTab = tab as any;
+        }
+      }
+      setActiveTab(initialTab);
+      
+      const adminId = user.email || "admin";
+      if (hasLoggedAccess.current !== adminId) {
+        console.log("[Egrégora Debug] Chamando addLog para admin:", adminId);
+        hasLoggedAccess.current = adminId;
+        addLog("SISTEMA", `Acesso detectado - Administrador: ${user.email} | Data/Hora: ${new Date().toLocaleString('pt-BR')}`);
+      } else {
+        console.log("[Egrégora Debug] Acesso já registrado anteriormente para admin:", adminId);
+      }
     } else {
       setUserRole("creator");
       setActiveTab("creator");
@@ -562,11 +816,14 @@ export default function EgrégoraCMS() {
           headers["Authorization"] = `Bearer ${token}`;
         }
 
+        console.log("[Egrégora Debug] Buscando condôminos da API...");
         const res = await fetch(`${API_BASE_URL}/api/condominos`, { headers });
         if (res.ok) {
           const data = await res.json();
+          console.log("[Egrégora Debug] Total condôminos retornados:", data.length);
           const match = data.find((c: any) => c.email.toLowerCase() === user.email?.toLowerCase());
           if (match) {
+            console.log("[Egrégora Debug] Condômino correspondente encontrado:", match.nome_comercial);
             setSelectedCreatorId(match.id);
             setAssociatedCreator({
               id: match.id,
@@ -584,7 +841,19 @@ export default function EgrégoraCMS() {
               videos_entregues_esta_semana: typeof match.videos_entregues_esta_semana === "number" ? match.videos_entregues_esta_semana : (match.status === "ATIVO_ADIMPLENTE" ? 2 : 0),
               receita_adsense_gerada: 0
             });
+
+            if (hasLoggedAccess.current !== match.email) {
+              console.log("[Egrégora Debug] Chamando addLog para criador:", match.email);
+              hasLoggedAccess.current = match.email;
+              addLog("SISTEMA", `Acesso detectado - Criador: ${match.nome_comercial} (${match.email}) | Data/Hora: ${new Date().toLocaleString('pt-BR')}`);
+            } else {
+              console.log("[Egrégora Debug] Acesso já registrado anteriormente para criador:", match.email);
+            }
+          } else {
+            console.log("[Egrégora Debug] Nenhum condômino correspondente para o e-mail:", user.email);
           }
+        } else {
+          console.log("[Egrégora Debug] Falha ao buscar condôminos da API:", res.status);
         }
       } catch (err) {
         console.error("Erro ao carregar criador associado:", err);
@@ -598,6 +867,10 @@ export default function EgrégoraCMS() {
     setUserRole(null);
     setAssociatedCreator(null);
     setActiveTab("onboarding");
+    hasLoggedAccess.current = null;
+    if (typeof window !== "undefined") {
+      sessionStorage.clear();
+    }
   };
 
   useEffect(() => {
@@ -631,24 +904,12 @@ export default function EgrégoraCMS() {
 
     fetchCondominos();
     fetchFechamentos();
+    fetchTransacoes();
+    fetchCategorias();
     fetchConfigs();
     fetchYoutubeStats();
+    fetchSystemLogs();
 
-    const savedLogs = localStorage.getItem("egregora_logs");
-    if (savedLogs) {
-      setLogs(JSON.parse(savedLogs));
-    } else {
-      const initialLogs: LogEntry[] = [
-        {
-          id: "log-1",
-          timestamp: new Date().toLocaleTimeString(),
-          tipo: "SISTEMA",
-          mensagem: "Sistema Egrégora inicializado com sucesso."
-        }
-      ];
-      setLogs(initialLogs);
-      localStorage.setItem("egregora_logs", JSON.stringify(initialLogs));
-    }
 
     return () => {
       subscription.unsubscribe();
@@ -661,16 +922,60 @@ export default function EgrégoraCMS() {
     localStorage.setItem("egregora_logs", JSON.stringify(updatedLogs));
   };
 
-  const addLog = (tipo: LogEntry["tipo"], mensagem: string, currentCondominos = condominos) => {
+  const fetchSystemLogs = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_logs")
+        .select("*")
+        .order("timestamp", { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error("Erro ao carregar logs do banco:", error);
+        return;
+      }
+
+      if (data) {
+        const formattedLogs: LogEntry[] = data.map((log: any) => ({
+          id: log.id,
+          timestamp: new Date(log.timestamp).toLocaleTimeString("pt-BR"),
+          tipo: log.tipo as LogEntry["tipo"],
+          mensagem: log.mensagem
+        }));
+        setLogs(formattedLogs);
+      }
+    } catch (err) {
+      console.error("Erro no fetchSystemLogs:", err);
+    }
+  };
+
+  const addLog = async (tipo: LogEntry["tipo"], mensagem: string, _currentCondominos?: any) => {
+    console.log("[Egrégora Debug] addLog chamado. Tipo:", tipo, "Mensagem:", mensagem);
     const newLog: LogEntry = {
       id: "log-" + Date.now(),
       timestamp: new Date().toLocaleTimeString(),
       tipo,
       mensagem
     };
-    const newLogs = [newLog, ...logs].slice(0, 50); // Keep last 50 logs
-    setLogs(newLogs);
-    localStorage.setItem("egregora_logs", JSON.stringify(newLogs));
+    
+    setLogs(prev => {
+      const isDuplicate = prev.length > 0 && prev[0].mensagem === mensagem;
+      if (isDuplicate) return prev;
+      return [newLog, ...prev].slice(0, 50);
+    });
+
+    try {
+      const { error } = await supabase
+        .from("system_logs")
+        .insert({ tipo, mensagem });
+      if (error) {
+        console.error("Erro ao inserir log no banco:", error);
+      } else {
+        await fetchSystemLogs();
+      }
+    } catch (err) {
+      console.error("Erro ao salvar log no banco:", err);
+    }
   };
 
   const handleSavePlaylistId = async (id: string, playlistId: string) => {
@@ -1039,20 +1344,18 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
     }
   };
 
-  const resetDB = () => {
+  const resetDB = async () => {
     if (confirm("Deseja realmente reiniciar o banco de dados simulado?")) {
       localStorage.removeItem("egregora_condominos");
       localStorage.removeItem("egregora_logs");
-      setCondominos(DEFAULT_CONDOMINOS);
-      setLogs([
-        {
-          id: "log-init",
-          timestamp: new Date().toLocaleTimeString(),
-          tipo: "SISTEMA",
-          mensagem: "Banco de dados restaurado aos padrões do PRD."
-        }
-      ]);
-      alert("Banco restaurado!");
+      try {
+        await supabase.from("system_logs").delete().neq("tipo", "INEXISTENTE");
+        setCondominos(DEFAULT_CONDOMINOS);
+        addLog("SISTEMA", "Banco de dados restaurado aos padrões do PRD.");
+        alert("Banco restaurado!");
+      } catch (err) {
+        console.error("Erro ao resetar logs:", err);
+      }
     }
   };
 
@@ -1153,28 +1456,26 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
   const chartData = getChartPoints();
 
   return (
-    <div className="min-h-screen bg-[#111622] nebula-gradient flex flex-col font-sans">
-      {/* Mystical Header */}
-      <header className="border-b border-[#E2B042]/20 py-4 px-6 md:px-12 flex flex-col md:flex-row justify-between items-center bg-[#1A1D29]/75 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-3 mb-4 md:mb-0">
-          <img
-            src="/logo.png"
-            alt="Cosmo Alma TV Logo"
-            className="h-10 w-10 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622] mystic-glow"
-          />
-          <div>
-            <h1 className="text-xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
-              COSMO ALMA TV
-            </h1>
-            <p className="text-[10px] uppercase tracking-[0.25em] text-[#E2B042]">Portal Egrégora CMS</p>
+    <div className={`min-h-screen bg-[#111622] nebula-gradient flex font-sans ${currentUser ? 'flex-col md:flex-row' : 'flex-col'}`}>
+      {/* Conditionally render: sidebar for logged-in, or top header for guest */}
+      {!currentUser ? (
+        <header className="border-b border-[#E2B042]/20 py-4 px-6 md:px-12 flex flex-col md:flex-row justify-between items-center bg-[#1A1D29]/75 backdrop-blur-md sticky top-0 z-50 w-full">
+          <div className="flex items-center gap-3 mb-4 md:mb-0">
+            <img
+              src="/logo.png"
+              alt="Cosmo Alma TV Logo"
+              className="h-10 w-10 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622] mystic-glow"
+            />
+            <div>
+              <h1 className="text-xl font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
+                COSMO ALMA TV
+              </h1>
+              <p className="text-[10px] uppercase tracking-[0.25em] text-[#E2B042]">Portal Egrégora CMS</p>
+            </div>
           </div>
-        </div>
-
-        <nav className="flex gap-2 items-center">
-          {mounted && (
-            <>
-              {/* Public Tab */}
-              {(!currentUser || userRole === "admin") && (
+          <nav className="flex gap-2 items-center">
+            {mounted && (
+              <>
                 <button
                   onClick={() => { setActiveTab("onboarding"); setIsOnboardingCompleted(false); }}
                   className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
@@ -1185,71 +1486,172 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 >
                   🌌 ONBOARDING PÚBLICO
                 </button>
-              )}
-
-              {/* Admin Tab */}
-              {currentUser && userRole === "admin" && (
-                <button
-                  onClick={() => setActiveTab("admin")}
-                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
-                    activeTab === "admin"
-                      ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
-                      : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
-                  }`}
-                >
-                  📊 PAINEL GESTÃO (ADMIN)
-                </button>
-              )}
-
-              {/* Creator Tab */}
-              {currentUser && (userRole === "admin" || userRole === "creator") && (
-                <button
-                  onClick={() => {
-                    setActiveTab("creator");
-                    if (userRole === "creator" && associatedCreator) {
-                      setSelectedCreatorId(associatedCreator.id);
-                    } else if (!selectedCreatorId && condominos.length > 0) {
-                      setSelectedCreatorId(condominos[0].id);
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-full text-xs font-semibold tracking-wider transition-all duration-300 cursor-pointer ${
-                    activeTab === "creator"
-                      ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.4)]"
-                      : "bg-[#1A1D29] text-gray-300 hover:text-white border border-[#E2B042]/20"
-                  }`}
-                >
-                  🧘 ÁREA DO CRIADOR
-                </button>
-              )}
-
-              {/* Login / Logout Button */}
-              {!currentUser ? (
                 <button
                   onClick={() => router.push("/login")}
                   className="px-4 py-2 rounded-full text-xs font-semibold tracking-wider bg-[#1A1D29] text-[#E2B042] hover:text-white border border-[#E2B042]/40 hover:bg-[#E2B042]/10 transition-all cursor-pointer font-bold"
                 >
                   🔑 ENTRAR
                 </button>
+              </>
+            )}
+          </nav>
+        </header>
+      ) : (
+        <>
+          {/* Mobile Top Bar */}
+          <header className="md:hidden border-b border-[#E2B042]/20 py-3 px-4 flex justify-between items-center bg-[#1A1D29]/90 sticky top-0 z-50 w-full shrink-0">
+            <div className="flex items-center gap-2">
+              <img src="/logo.png" alt="Logo" className="h-8 w-8 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622]" />
+              <div>
+                <h1 className="text-sm font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
+                  COSMO ALMA TV
+                </h1>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="text-gray-300 hover:text-white p-1 focus:outline-none"
+            >
+              {isMobileMenuOpen ? (
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
               ) : (
-                <div className="flex items-center gap-3 ml-2 border-l border-gray-800 pl-3">
-                  <span className="text-[10px] text-gray-400 font-mono hidden md:inline truncate max-w-[120px]" title={currentUser.email}>
-                    {currentUser.email}
-                  </span>
-                  <button
-                    onClick={handleLogout}
-                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-red-950/40 text-red-400 hover:text-red-300 border border-red-900/50 hover:bg-red-900/30 transition-all cursor-pointer"
-                  >
-                    🚪 SAIR
-                  </button>
-                </div>
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
               )}
-            </>
+            </button>
+          </header>
+
+          {/* Sidebar Nav - Desktop (Persistent) & Mobile (Drawer) */}
+          <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#1A1D29]/95 border-r border-[#E2B042]/20 flex flex-col justify-between transition-transform duration-300 md:translate-x-0 md:static md:h-screen shrink-0 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+            <div>
+              {/* Logo Branding */}
+              <div className="flex items-center gap-3 py-6 px-6 border-b border-gray-800">
+                <img
+                  src="/logo.png"
+                  alt="Cosmo Alma TV Logo"
+                  className="h-10 w-10 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622] mystic-glow"
+                />
+                <div>
+                  <h1 className="text-md font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-white via-[#E2B042] to-purple-400 font-[family-name:var(--font-josefin-sans)]">
+                    COSMO ALMA TV
+                  </h1>
+                  <p className="text-[9px] uppercase tracking-[0.2em] text-[#E2B042]">Portal Egrégora CMS</p>
+                </div>
+              </div>
+
+              {/* Navigation Links */}
+              <nav className="p-4 flex flex-col gap-2">
+                {/* Onboarding tab */}
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => { setActiveTab("onboarding"); setIsOnboardingCompleted(false); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer ${
+                      activeTab === "onboarding"
+                        ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
+                        : "text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/10"
+                    }`}
+                  >
+                    <span>🌌</span> ONBOARDING PÚBLICO
+                  </button>
+                )}
+
+                {/* Admin tab */}
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => { setActiveTab("admin"); setIsMobileMenuOpen(false); }}
+                    className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer ${
+                      activeTab === "admin"
+                        ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
+                        : "text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/10"
+                    }`}
+                  >
+                    <span>📊</span> PAINEL GESTÃO (ADMIN)
+                  </button>
+                )}
+                {/* Financeiro tab */}
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => { setActiveTab("financeiro"); setIsMobileMenuOpen(false); fetchTransacoes(); }}
+                    className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer ${
+                      activeTab === "financeiro"
+                        ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
+                        : "text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/10"
+                    }`}
+                  >
+                    <span>💰</span> CONTROLE FINANCEIRO
+                  </button>
+                )}
+
+
+                {/* Creator tab */}
+                {(userRole === "admin" || userRole === "creator") && (
+                  <button
+                    onClick={() => {
+                      setActiveTab("creator");
+                      setIsMobileMenuOpen(false);
+                      if (userRole === "creator" && associatedCreator) {
+                        setSelectedCreatorId(associatedCreator.id);
+                      } else if (!selectedCreatorId && condominos.length > 0) {
+                        setSelectedCreatorId(condominos[0].id);
+                      }
+                    }}
+                    className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer ${
+                      activeTab === "creator"
+                        ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
+                        : "text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/10"
+                    }`}
+                  >
+                    <span>🧘</span> ÁREA DO CRIADOR
+                  </button>
+                )}
+
+                {/* Otimizador tab */}
+                {userRole === "admin" && (
+                  <button
+                    onClick={() => { router.push('/otimizador-youtube'); setIsMobileMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-purple-500/20"
+                  >
+                    <span>✂️</span> OTIMIZADOR YOUTUBE
+                  </button>
+                )}
+              </nav>
+            </div>
+
+            {/* User Info / Log out at bottom */}
+            <div className="p-4 border-t border-gray-800 bg-[#111622]/40">
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] text-gray-400 font-mono truncate" title={currentUser.email}>
+                  👤 {currentUser.email}
+                </span>
+                <span className="text-[9px] text-[#E2B042] font-semibold uppercase tracking-wider">
+                  Função: {userRole === "admin" ? "Administrador" : "Criador"}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="mt-2 w-full text-center px-3 py-2 rounded-lg text-xs font-semibold bg-red-950/40 text-red-400 hover:text-red-300 border border-red-900/50 hover:bg-red-900/30 transition-all cursor-pointer flex items-center justify-center gap-1"
+                >
+                  🚪 SAIR
+                </button>
+              </div>
+            </div>
+          </aside>
+
+          {/* Overlay to close mobile menu */}
+          {isMobileMenuOpen && (
+            <div
+              className="fixed inset-0 z-30 bg-black/60 md:hidden"
+              onClick={() => setIsMobileMenuOpen(false)}
+            />
           )}
-        </nav>
-      </header>
+        </>
+      )}
 
       {/* Main Content Area */}
-      <main className="flex-1 p-6 md:p-12 max-w-7xl mx-auto w-full">
+      <div className={`flex-1 flex flex-col ${currentUser ? 'md:h-screen md:overflow-y-auto' : ''}`}>
+        <main className="flex-1 p-6 md:p-12 max-w-7xl mx-auto w-full">
         
         {/* Tab 1: Onboarding Form */}
         {mounted && (activeTab === "onboarding" || !currentUser) && (
@@ -2308,9 +2710,21 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
                 {/* Event Logs */}
                 <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                  <h3 className="text-sm font-semibold tracking-wider uppercase text-gray-400">
-                    Logs da Egrégora
-                  </h3>
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                    <h3 className="text-sm font-semibold tracking-wider uppercase text-gray-400">
+                      Logs da Egrégora
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] text-gray-600 font-mono">v3.2.1-debug</span>
+                      <button
+                        type="button"
+                        onClick={() => addLog("SISTEMA", `Log de teste manual acionado | User: ${currentUser?.email}`)}
+                        className="text-[8px] uppercase tracking-wider bg-purple-900/50 hover:bg-purple-800 text-purple-300 px-2 py-0.5 rounded border border-purple-800 transition-colors cursor-pointer"
+                      >
+                        Testar Log
+                      </button>
+                    </div>
+                  </div>
                   <div className="h-44 overflow-y-auto space-y-2 text-[10px] font-mono pr-2">
                     {logs.map(log => {
                       const logColors = {
@@ -2425,6 +2839,372 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
           </div>
         )}
+
+        {/* Tab 4: Financeiro Dashboard */}
+        {mounted && activeTab === "financeiro" && currentUser && userRole === "admin" && (() => {
+          const totalEntradas = transacoes.reduce((acc, t) => t.tipo === "ENTRADA" ? acc + t.valor : acc, 0);
+          const totalSaidas = transacoes.reduce((acc, t) => t.tipo === "SAIDA" ? acc + t.valor : acc, 0);
+          const saldoLiquido = totalEntradas - totalSaidas;
+
+          return (
+            <div className="space-y-8 animate-fadeIn">
+              
+              {/* Filter & Month Selector */}
+              <div className="flex flex-col sm:flex-row justify-between items-center bg-[#1A1D29] border border-gray-800 p-4 rounded-xl gap-4">
+                <div>
+                  <h2 className="text-md font-semibold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)]">
+                    Controle de Caixa e Finanças
+                  </h2>
+                  <p className="text-[10px] text-gray-500">Gestão integrada de entradas, saídas e reservas operacionais</p>
+                </div>
+                 <div className="flex items-center gap-2 print:hidden">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3 py-1.5 bg-purple-950/40 hover:bg-purple-900/40 text-purple-300 border border-purple-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer mr-2"
+                  >
+                    📄 Exportar PDF
+                  </button>
+                  <label className="text-xs text-gray-400 uppercase tracking-wide font-medium">Mês de Referência:</label>
+                  <input
+                    type="month"
+                    value={filtroMes}
+                    onChange={(e) => {
+                      setFiltroMes(e.target.value);
+                      fetchTransacoes(e.target.value);
+                    }}
+                    className="bg-[#111622] border border-gray-800 text-white rounded-lg p-2 text-xs focus:border-[#E2B042] focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Summary Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Total de Entradas</span>
+                  <span className="text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#38A169]">
+                    R$ {totalEntradas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-gray-500 block mt-1">Cotas recebidas + retornos de Adsense</span>
+                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">📈</div>
+                </div>
+
+                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Total de Saídas</span>
+                  <span className="text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#E53E3E]">
+                    R$ {totalSaidas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-gray-500 block mt-1">Tráfego pago, softwares e custos operacionais</span>
+                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">📉</div>
+                </div>
+
+                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden border-l-4 border-l-[#E2B042]">
+                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Saldo Líquido</span>
+                  <span className={`text-3xl font-bold font-[family-name:var(--font-josefin-sans)] ${saldoLiquido >= 0 ? 'text-[#E2B042]' : 'text-red-400'}`}>
+                    R$ {saldoLiquido.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  <span className="text-[10px] text-gray-500 block mt-1">Disponível no caixa de gestão</span>
+                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">⚖️</div>
+                </div>
+              </div>
+
+              {/* Columns layout */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                {/* Form to Launch Transaction */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4 h-fit">
+                  <h3 className="text-sm font-semibold tracking-wider uppercase text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
+                    Lançar Transação
+                  </h3>
+                  <form onSubmit={handleLaunchTransaction} className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] uppercase text-gray-400 mb-1">Tipo de Fluxo</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setNovaTransacaoTipo("ENTRADA"); setNovaTransacaoCategoria("Cota Condominial"); }}
+                          className={`py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                            novaTransacaoTipo === "ENTRADA"
+                              ? "bg-green-950/40 text-green-400 border-green-800"
+                              : "bg-[#111622] text-gray-400 border-gray-850 hover:bg-[#161B29]"
+                          }`}
+                        >
+                          🟢 Entrada (Receita)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setNovaTransacaoTipo("SAIDA"); setNovaTransacaoCategoria("Tráfego Pago"); }}
+                          className={`py-2 rounded-lg text-xs font-bold transition-all border cursor-pointer ${
+                            novaTransacaoTipo === "SAIDA"
+                              ? "bg-red-950/40 text-red-400 border-red-800"
+                              : "bg-[#111622] text-gray-400 border-gray-850 hover:bg-[#161B29]"
+                          }`}
+                        >
+                          🔴 Saída (Despesa)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] uppercase text-gray-400 mb-1">Descrição</label>
+                      <input
+                        type="text"
+                        required
+                        value={novaTransacaoDescricao}
+                        onChange={(e) => setNovaTransacaoDescricao(e.target.value)}
+                        placeholder="Ex: Assinatura ChatGPT, Anúncio Facebook Ads"
+                        className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:border-[#E2B042] focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] uppercase text-gray-400 mb-1">Valor (R$)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={novaTransacaoValor}
+                          onChange={(e) => setNovaTransacaoValor(e.target.value)}
+                          placeholder="0,00"
+                          className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:border-[#E2B042] focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase text-gray-400 mb-1">Data</label>
+                        <input
+                          type="date"
+                          required
+                          value={novaTransacaoData}
+                          onChange={(e) => setNovaTransacaoData(e.target.value)}
+                          className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:border-[#E2B042] focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="block text-[10px] uppercase text-gray-400">Categoria</label>
+                          <button
+                            type="button"
+                            onClick={() => { setIsCategoriasModalOpen(true); fetchCategorias(); }}
+                            className="text-[9px] text-[#E2B042] hover:text-[#D69E2E] font-bold uppercase transition-colors cursor-pointer"
+                          >
+                            ⚙️ Gerenciar
+                          </button>
+                        </div>
+                        <select
+                          value={novaTransacaoCategoria}
+                          onChange={(e) => setNovaTransacaoCategoria(e.target.value)}
+                          className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:border-[#E2B042] focus:outline-none"
+                        >
+                          {categorias.length > 0 ? (
+                            categorias
+                              .filter((cat) => cat.tipo === novaTransacaoTipo)
+                              .map((cat) => (
+                                <option key={cat.id} value={cat.nome}>{cat.nome}</option>
+                              ))
+                          ) : (
+                            novaTransacaoTipo === "SAIDA" ? (
+                              <>
+                                <option value="Tráfego Pago">Tráfego Pago</option>
+                                <option value="Ferramentas IA">Ferramentas IA</option>
+                                <option value="Impostos">Impostos</option>
+                                <option value="Design/Edição">Design/Edição</option>
+                                <option value="Outros">Outros</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="Cota Condominial">Cota Condominial</option>
+                                <option value="Retenção 30% Adsense">Retenção 30% Adsense</option>
+                                <option value="Outros">Outros</option>
+                              </>
+                            )
+                          )}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase text-gray-400 mb-1">Status</label>
+                        <select
+                          value={novaTransacaoStatus}
+                          onChange={(e) => setNovaTransacaoStatus(e.target.value as any)}
+                          className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:border-[#E2B042] focus:outline-none"
+                        >
+                          <option value="PAGO">Pago / Liquidado</option>
+                          <option value="PENDENTE">Pendente</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={novaTransacaoLoading}
+                      className="w-full py-2.5 bg-[#E2B042] hover:bg-[#D69E2E] disabled:bg-gray-850 text-black text-xs font-bold rounded-lg uppercase tracking-wider transition-all cursor-pointer"
+                    >
+                      {novaTransacaoLoading ? "Processando..." : "🚀 Lançar no Caixa"}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Transactions List */}
+                <div className="lg:col-span-2 bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
+                  <h3 className="text-sm font-semibold tracking-wider uppercase text-gray-400">
+                    Histórico de Lançamentos ({filtroMes})
+                  </h3>
+
+                  {financeiroLoading ? (
+                    <div className="text-center py-10 text-gray-500 text-xs italic">
+                      Buscando movimentações no cosmos...
+                    </div>
+                  ) : transacoes.length === 0 ? (
+                    <div className="text-center py-10 bg-[#111622] rounded-xl border border-gray-850 text-gray-500 text-xs italic">
+                      Nenhuma transação lançada para este mês de referência.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-800 text-gray-400 font-bold">
+                            <th className="pb-2 font-semibold">Data</th>
+                            <th className="pb-2 font-semibold">Descrição</th>
+                            <th className="pb-2 font-semibold">Categoria</th>
+                            <th className="pb-2 font-semibold text-right">Valor</th>
+                            <th className="pb-2 font-semibold text-center">Status</th>
+                            <th className="pb-2 font-semibold text-center">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800/50">
+                          {transacoes.map((t) => (
+                            <tr key={t.id} className="hover:bg-[#111622]/30 transition-colors">
+                              <td className="py-3 font-mono text-[10px] text-gray-400">
+                                {new Date(t.data_transacao).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
+                              </td>
+                              <td className="py-3 font-medium text-white max-w-[200px] truncate" title={t.descricao}>
+                                {t.descricao}
+                              </td>
+                              <td className="py-3">
+                                <span className="text-[10px] bg-purple-950/20 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-medium">
+                                  {t.categoria}
+                                </span>
+                              </td>
+                              <td className={`py-3 text-right font-bold font-mono ${t.tipo === "ENTRADA" ? "text-green-400" : "text-red-400"}`}>
+                                {t.tipo === "ENTRADA" ? "+ " : "- "}R$ {t.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-3 text-center">
+                                <button
+                                  onClick={() => handleToggleTransactionStatus(t.id, t.status)}
+                                  className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors cursor-pointer border ${
+                                    t.status === "PAGO"
+                                      ? "bg-green-950/40 text-green-400 border-green-800/40 hover:bg-green-900/40"
+                                      : "bg-yellow-950/40 text-yellow-400 border-yellow-800/40 hover:bg-yellow-900/40"
+                                  }`}
+                                >
+                                  {t.status === "PAGO" ? "Pago" : "Pendente"}
+                                </button>
+                              </td>
+                              <td className="py-3 text-center">
+                                <button
+                                  onClick={() => handleDeleteTransaction(t.id)}
+                                  className="text-[10px] bg-red-950/30 hover:bg-red-900/50 text-red-400 border border-red-800/30 hover:border-red-700/50 px-2 py-1 rounded transition-colors cursor-pointer"
+                                >
+                                  Excluir
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* Modal de Gerenciamento de Categorias */}
+              {isCategoriasModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+                  <div className="bg-[#1A1D29] border border-gray-800 rounded-xl p-6 max-w-md w-full space-y-4 shadow-2xl relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoriasModalOpen(false)}
+                      className="absolute right-4 top-4 text-gray-400 hover:text-white text-md focus:outline-none cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                    <h3 className="text-md font-semibold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)]">
+                      Gerenciar Categorias
+                    </h3>
+
+                    {/* Form to create new category */}
+                    <form onSubmit={handleCreateCategory} className="space-y-3 border-b border-gray-800 pb-4">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] uppercase text-gray-400 mb-1">Nova Categoria</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: Marketing, IA Avançada"
+                            value={novaCategoriaNome}
+                            onChange={(e) => setNovaCategoriaNome(e.target.value)}
+                            className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-[#E2B042]"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase text-gray-400 mb-1">Tipo de Categoria</label>
+                          <select
+                            value={novaCategoriaTipo}
+                            onChange={(e) => setNovaCategoriaTipo(e.target.value as any)}
+                            className="w-full bg-[#111622] border border-gray-800 rounded-lg p-2 text-xs text-white focus:outline-none"
+                          >
+                            <option value="SAIDA">🔴 Saída (Despesa)</option>
+                            <option value="ENTRADA">🟢 Entrada (Receita)</option>
+                          </select>
+                        </div>
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full py-1.5 bg-[#E2B042] hover:bg-[#D69E2E] text-black text-xs font-bold rounded-lg uppercase tracking-wider transition-all cursor-pointer"
+                      >
+                        ➕ Adicionar Categoria
+                      </button>
+                    </form>
+
+                    {/* List categories with delete button */}
+                    <div className="space-y-2">
+                      <h4 className="text-[10px] uppercase text-gray-400 font-semibold">Categorias Cadastradas</h4>
+                      <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-none">
+                        {categoriasLoading ? (
+                          <p className="text-[10px] text-gray-500 italic text-center py-4">Buscando categorias...</p>
+                        ) : categorias.length === 0 ? (
+                          <p className="text-[10px] text-gray-500 italic text-center py-4">Nenhuma categoria customizada cadastrada.</p>
+                        ) : (
+                          categorias.map((cat) => (
+                            <div key={cat.id} className="flex justify-between items-center bg-[#111622] p-2 rounded border border-gray-850">
+                              <div className="flex items-center gap-2">
+                                <span className={cat.tipo === "ENTRADA" ? "text-green-400" : "text-red-400"}>
+                                  {cat.tipo === "ENTRADA" ? "🟢" : "🔴"}
+                                </span>
+                                <span className="text-xs text-white font-medium">{cat.nome}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCategory(cat.id)}
+                                className="text-[9px] bg-red-950/20 hover:bg-red-900/40 text-red-400 border border-red-800/30 px-2 py-0.5 rounded transition-all cursor-pointer"
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          );
+        })()}
 
         {/* Tab 3: Creator Dashboard View */}
         {mounted && activeTab === "creator" && currentUser && (userRole === "admin" || userRole === "creator") && (
@@ -2890,6 +3670,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
         <p>© 2026 Cosmo Alma TV. Todos os direitos reservados à Egrégora de Criadores.</p>
         <p className="mt-1 text-gray-600">Desenvolvido em conformidade com o Contrato V3 e regulamentos do Asaas/YouTube.</p>
       </footer>
+      </div>
     </div>
   );
 }

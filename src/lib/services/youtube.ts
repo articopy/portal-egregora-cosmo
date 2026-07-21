@@ -40,12 +40,12 @@ export async function fetchWeeklyUploadsCount(playlistId: string, weekStartDateS
     } else {
       const errText = await response.text();
       console.error(`YouTube API Error: ${errText}`);
-      return 2; // Fallback
+      throw new Error(`YouTube API Error: ${errText}`);
     }
   } catch (error) {
     clearTimeout(timeoutId);
     console.error(`YouTube fetch exception:`, error);
-    return 2; // Fallback
+    throw error;
   }
 }
 

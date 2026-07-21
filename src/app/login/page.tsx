@@ -125,6 +125,7 @@ export default function Login() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               placeholder="seuemail@exemplo.com"
               className="w-full bg-[#111622] border border-gray-800 rounded-lg p-3 text-sm focus:border-[#E2B042] focus:outline-none text-white transition-colors"
             />
@@ -140,6 +141,7 @@ export default function Login() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
                 placeholder="••••••••"
                 className="w-full bg-[#111622] border border-gray-800 rounded-lg p-3 text-sm focus:border-[#E2B042] focus:outline-none text-white transition-colors"
               />

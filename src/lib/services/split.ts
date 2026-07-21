@@ -38,6 +38,25 @@ export async function runMonthlyFinancialSplit(
     throw new Error(`Failed to save fechamento financeiro: ${insertError?.message}`);
   }
 
+  // Save the 30% management retention as a financial transaction inflow (if > 0)
+  if (retencaoAdm30 > 0) {
+    try {
+      await supabase
+        .from("transacoes_financeiras")
+        .insert({
+          tipo: "ENTRADA",
+          descricao: `Retenção 30% Adsense - Ref: ${mesReferencia}`,
+          valor: retencaoAdm30,
+          categoria: "Retenção 30% Adsense",
+          status: "PAGO",
+          mes_referencia: mesReferencia,
+          data_transacao: new Date().toISOString().split("T")[0]
+        });
+    } catch (txErr) {
+      console.error("Failed to insert Adsense retention transaction:", txErr);
+    }
+  }
+
   return {
     id: fechamento.id,
     mes_referencia: fechamento.mes_referencia,

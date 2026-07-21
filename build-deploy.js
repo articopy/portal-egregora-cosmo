@@ -12,15 +12,7 @@ function log(msg) {
 
 function deleteFolderRecursive(directoryPath) {
   if (fs.existsSync(directoryPath)) {
-    fs.readdirSync(directoryPath).forEach((file) => {
-      const curPath = path.join(directoryPath, file);
-      if (fs.lstatSync(curPath).isDirectory()) {
-        deleteFolderRecursive(curPath);
-      } else {
-        fs.unlinkSync(curPath);
-      }
-    });
-    fs.rmdirSync(directoryPath);
+    fs.rmSync(directoryPath, { recursive: true, force: true });
   }
 }
 
@@ -227,8 +219,9 @@ require('./server.js');
 
   // 5. Zipar a pasta de deploy
   log("Compactando pasta 'deploy' em 'egregora-deploy.zip'...");
-  const psCommand = `powershell -Command "Compress-Archive -Path '${DEPLOY_DIR}\\*' -DestinationPath '${ZIP_FILE}' -Force"`;
-  execSync(psCommand, { stdio: "inherit" });
+  const filesAndFolders = fs.readdirSync(DEPLOY_DIR);
+  const tarCommand = `tar -a -c -f "${ZIP_FILE}" -C "${DEPLOY_DIR}" ${filesAndFolders.map(f => `"${f}"`).join(" ")}`;
+  execSync(tarCommand, { stdio: "inherit" });
 
   // 6. Limpar pasta temporária deploy
   log("Limpando pasta temporária 'deploy'...");

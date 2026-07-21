@@ -37,9 +37,41 @@ export async function POST(request: Request) {
 
       if (updateError) throw new Error(updateError.message);
 
+      // Record transaction in cashflow
+      const paymentId = payment.id || "";
+      const valorPago = payment.value || 100.0;
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, "0");
+      const mes_referencia = `${year}-${month}`;
+
+      try {
+        const { data: existingTx } = await supabase
+          .from("transacoes_financeiras")
+          .select("id")
+          .ilike("descricao", `%${paymentId}%`)
+          .maybeSingle();
+
+        if (!existingTx && paymentId) {
+          await supabase
+            .from("transacoes_financeiras")
+            .insert({
+              tipo: "ENTRADA",
+              descricao: `Cota Condominial - ${condomino.nome_comercial} (Ref Asaas: ${paymentId})`,
+              valor: valorPago,
+              categoria: "Cota Condominial",
+              status: "PAGO",
+              mes_referencia,
+              data_transacao: today.toISOString().split("T")[0]
+            });
+        }
+      } catch (txErr) {
+        console.error("Failed to record condomino payment in transacoes_financeiras:", txErr);
+      }
+
       return NextResponse.json({
         status: "success",
-        message: `Condômino ${condomino.nome_comercial} ativado como adimplente.`,
+        message: `Condômino ${condomino.nome_comercial} ativado como adimplente e transação registrada.`,
       });
     } else if (event === "PAYMENT_OVERDUE") {
       // Cláusula 11ª: Suspensão automática por inadimplência

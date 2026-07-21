@@ -6,17 +6,41 @@ const supabaseKey = "sb_publishable_LZRy15hzdTVZRvNoT8Lm2A_dWE7Ymf9";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function check() {
-  const { data, error } = await supabase
+  const { data: condomino, error } = await supabase
     .from("condominos")
-    .select("id, nome_completo, email, zapsign_doc_id, status");
+    .select("*")
+    .eq("email", "emilene.andre22@gmail.com")
+    .single();
 
   if (error) {
-    console.error("Error fetching condominos:", error);
+    console.error("Error fetching condomino:", error);
     return;
   }
 
-  console.log("Condominos in database:");
-  console.log(JSON.stringify(data, null, 2));
+  console.log("Deleting deliveries for Emmy...");
+  const { error: deleteError } = await supabase
+    .from("entregas_video")
+    .delete()
+    .eq("condomino_id", condomino.id);
+
+  if (deleteError) {
+    console.error("Error deleting deliveries:", deleteError);
+    return;
+  }
+
+  console.log("Deleted successfully.");
+
+  const { data: deliveries, error: delError } = await supabase
+    .from("entregas_video")
+    .select("*")
+    .eq("condomino_id", condomino.id);
+
+  if (delError) {
+    console.error("Error fetching deliveries:", delError);
+    return;
+  }
+
+  console.log("Deliveries for Emmy after delete:", deliveries);
 }
 
 check();

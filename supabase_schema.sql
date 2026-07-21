@@ -96,3 +96,49 @@ INSERT INTO public.portal_configs (key, value) VALUES
 ('youtube_channel_id', 'UCEI3LDmVQceZpC0zagt398Q')
 ON CONFLICT (key) DO NOTHING;
 
+-- 5. Tabela de Transações Financeiras (Controle de Caixa)
+CREATE TABLE IF NOT EXISTS public.transacoes_financeiras (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    data_transacao DATE NOT NULL DEFAULT CURRENT_DATE,
+    tipo VARCHAR(20) NOT NULL, -- ENTRADA or SAIDA
+    descricao VARCHAR(255) NOT NULL,
+    valor DOUBLE PRECISION NOT NULL,
+    categoria VARCHAR(100) NOT NULL, -- Tráfego Pago, Ferramentas IA, Impostos, Cota Condominial, Retenção 30% Adsense, Outros
+    status VARCHAR(50) NOT NULL DEFAULT 'PAGO', -- PAGO, PENDENTE
+    mes_referencia VARCHAR(7) NOT NULL, -- Ex: 2026-07
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.transacoes_financeiras ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.transacoes_financeiras FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.transacoes_financeiras FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.transacoes_financeiras FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.transacoes_financeiras FOR DELETE USING (true);
+
+-- 6. Tabela de Categorias Financeiras
+CREATE TABLE IF NOT EXISTS public.categorias_financeiras (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome VARCHAR(100) UNIQUE NOT NULL,
+    tipo VARCHAR(20) NOT NULL, -- ENTRADA or SAIDA
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.categorias_financeiras ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.categorias_financeiras FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.categorias_financeiras FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.categorias_financeiras FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.categorias_financeiras FOR DELETE USING (true);
+
+-- Inserir dados padrão iniciais
+INSERT INTO public.categorias_financeiras (nome, tipo) VALUES
+('Cota Condominial', 'ENTRADA'),
+('Retenção 30% Adsense', 'ENTRADA'),
+('Tráfego Pago', 'SAIDA'),
+('Ferramentas IA', 'SAIDA'),
+('Impostos', 'SAIDA'),
+('Design/Edição', 'SAIDA'),
+('Outros', 'SAIDA')
+ON CONFLICT (nome) DO NOTHING;
+
+
+
