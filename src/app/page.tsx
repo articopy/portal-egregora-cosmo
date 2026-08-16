@@ -95,6 +95,7 @@ export default function EgrégoraCMS() {
   const [novaTransacaoStatus, setNovaTransacaoStatus] = useState<"PAGO" | "PENDENTE">("PAGO");
   const [novaTransacaoData, setNovaTransacaoData] = useState(() => new Date().toISOString().split("T")[0]);
   const [novaTransacaoLoading, setNovaTransacaoLoading] = useState(false);
+  const [paginaAtualTransacoes, setPaginaAtualTransacoes] = useState(1);
 
   // Categorias states
   const [categorias, setCategorias] = useState<any[]>([]);
@@ -581,6 +582,7 @@ export default function EgrégoraCMS() {
       if (res.ok) {
         const data = await res.json();
         setTransacoes(data);
+        setPaginaAtualTransacoes(1);
       }
     } catch (err) {
       console.error("Erro ao carregar transações:", err);
@@ -665,7 +667,7 @@ export default function EgrégoraCMS() {
       const token = session?.access_token;
       if (!token) return;
 
-      const newStatus = currentStatus === "PAGO" ? "PENDENTE" : "PAGO";
+      const newStatus = currentStatus === "PAGO" ? "PENDENTE_APROVACAO" : "PAGO";
       const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
         method: "PATCH",
         headers: {
@@ -676,12 +678,122 @@ export default function EgrégoraCMS() {
       });
 
       if (res.ok) {
-        await fetchTransacoes();
+        await fetchTransacoes(filtroMes);
       } else {
         alert("Erro ao alterar status da transação.");
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleAprovarTransaction = async (id: string, categoria?: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const bodyData: any = { status: "PAGO" };
+      if (categoria) bodyData.categoria = categoria;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(bodyData)
+      });
+
+      if (res.ok) {
+        await fetchTransacoes(filtroMes);
+      } else {
+        alert("Erro ao aprovar transação.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleRejeitarTransaction = async (id: string) => {
+    if (!confirm("Deseja realmente rejeitar esta movimentação? ela não será contabilizada no caixa.")) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: "REJEITADO" })
+      });
+
+      if (res.ok) {
+        await fetchTransacoes(filtroMes);
+      } else {
+        alert("Erro ao rejeitar transação.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleUpdateTransactionCategory = async (id: string, newCategory: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ categoria: newCategory })
+      });
+
+      if (res.ok) {
+        await fetchTransacoes(filtroMes);
+      } else {
+        alert("Erro ao alterar categoria da transação.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const [syncingAsaas, setSyncingAsaas] = useState(false);
+
+  const handleSincronizarAsaas = async () => {
+    try {
+      setSyncingAsaas(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/sincronizar-asaas`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message || "Extrato Asaas sincronizado!");
+        await fetchTransacoes(filtroMes);
+      } else {
+        alert(data.message || data.detail || "Erro ao sincronizar extrato Asaas.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao conectar com a API de sincronização.");
+    } finally {
+      setSyncingAsaas(false);
     }
   };
 
@@ -2842,8 +2954,18 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
         {/* Tab 4: Financeiro Dashboard */}
         {mounted && activeTab === "financeiro" && currentUser && userRole === "admin" && (() => {
-          const totalEntradas = transacoes.reduce((acc, t) => t.tipo === "ENTRADA" ? acc + t.valor : acc, 0);
-          const totalSaidas = transacoes.reduce((acc, t) => t.tipo === "SAIDA" ? acc + t.valor : acc, 0);
+          const transacoesPagas = transacoes.filter((t) => t.status === "PAGO");
+          const transacoesPendentes = transacoes.filter((t) => t.status === "PENDENTE_APROVACAO");
+
+          const ITENS_POR_PAGINA = 8;
+          const totalPaginasTransacoes = Math.ceil(transacoes.length / ITENS_POR_PAGINA) || 1;
+          const transacoesExibidas = transacoes.slice(
+            (paginaAtualTransacoes - 1) * ITENS_POR_PAGINA,
+            paginaAtualTransacoes * ITENS_POR_PAGINA
+          );
+
+          const totalEntradas = transacoesPagas.reduce((acc, t) => t.tipo === "ENTRADA" ? acc + t.valor : acc, 0);
+          const totalSaidas = transacoesPagas.reduce((acc, t) => t.tipo === "SAIDA" ? acc + t.valor : acc, 0);
           const saldoLiquido = totalEntradas - totalSaidas;
 
           return (
@@ -2858,6 +2980,20 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   <p className="text-[10px] text-gray-500">Gestão integrada de entradas, saídas e reservas operacionais</p>
                 </div>
                  <div className="flex items-center gap-2 print:hidden">
+                  <button
+                    type="button"
+                    disabled={syncingAsaas}
+                    onClick={handleSincronizarAsaas}
+                    className="px-3 py-1.5 bg-blue-950/40 hover:bg-blue-900/50 disabled:bg-gray-800 text-blue-300 border border-blue-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer mr-1 flex items-center gap-1.5"
+                  >
+                    {syncingAsaas ? (
+                      <>
+                        <span className="animate-spin text-xs">🌀</span> Sincronizando...
+                      </>
+                    ) : (
+                      <>🔄 Sincronizar Extrato Asaas</>
+                    )}
+                  </button>
                   <button
                     type="button"
                     onClick={() => window.print()}
@@ -2907,6 +3043,95 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                   <div className="absolute right-4 bottom-4 text-2xl opacity-20">⚖️</div>
                 </div>
               </div>
+
+              {/* Movimentações Pendentes de Aprovação (Asaas / Caixa) */}
+              {transacoesPendentes.length > 0 && (
+                <div className="bg-[#1A1D29] border border-amber-800/40 p-6 rounded-xl space-y-4 bg-gradient-to-r from-[#1A1D29] via-[#241F1A] to-[#1A1D29]">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                      </span>
+                      <h3 className="text-sm font-semibold tracking-wider uppercase text-amber-400 font-[family-name:var(--font-josefin-sans)]">
+                        Movimentações Asaas Pendentes de Aprovação ({transacoesPendentes.length})
+                      </h3>
+                    </div>
+                    <span className="text-[10px] text-amber-300/80 bg-amber-950/40 border border-amber-800/40 px-2.5 py-1 rounded-full font-medium">
+                      Ação Manual Requerida
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-gray-400 font-bold">
+                          <th className="pb-2 font-semibold">Origem</th>
+                          <th className="pb-2 font-semibold">Data</th>
+                          <th className="pb-2 font-semibold">Descrição</th>
+                          <th className="pb-2 font-semibold">Categoria</th>
+                          <th className="pb-2 font-semibold text-right">Valor</th>
+                          <th className="pb-2 font-semibold text-center">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/50">
+                        {transacoesPendentes.map((t) => (
+                          <tr key={t.id} className="hover:bg-[#111622]/50 transition-colors">
+                            <td className="py-3 font-mono text-[10px]">
+                              <span className="px-2 py-0.5 rounded bg-blue-950/40 text-blue-300 border border-blue-800/40 font-bold uppercase">
+                                {t.origem || "ASAAS"}
+                              </span>
+                            </td>
+                            <td className="py-3 font-mono text-[10px] text-gray-400">
+                              {new Date(t.data_transacao).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
+                            </td>
+                            <td className="py-3 font-medium text-white max-w-[220px] truncate" title={t.descricao}>
+                              {t.descricao}
+                            </td>
+                            <td className="py-3">
+                              <select
+                                value={t.categoria}
+                                onChange={(e) => handleUpdateTransactionCategory(t.id, e.target.value)}
+                                className="text-[10px] bg-[#111622] text-purple-300 border border-purple-800/40 px-2 py-1 rounded font-medium focus:outline-none focus:border-purple-600 cursor-pointer max-w-[140px] truncate"
+                              >
+                                <option value="Cota Condominial">Cota Condominial</option>
+                                <option value="Retenção 30% Adsense">Retenção 30% Adsense</option>
+                                <option value="Tráfego Pago">Tráfego Pago</option>
+                                <option value="Ferramentas IA">Ferramentas IA</option>
+                                <option value="Impostos">Impostos</option>
+                                <option value="Design/Edição">Design/Edição</option>
+                                <option value="Outros">Outros</option>
+                                {categorias.map((cat) => (
+                                  !["Cota Condominial", "Retenção 30% Adsense", "Tráfego Pago", "Ferramentas IA", "Impostos", "Design/Edição", "Outros"].includes(cat.nome) && (
+                                    <option key={cat.id} value={cat.nome}>{cat.nome}</option>
+                                  )
+                                ))}
+                              </select>
+                            </td>
+                            <td className={`py-3 text-right font-bold font-mono ${t.tipo === "ENTRADA" ? "text-green-400" : "text-red-400"}`}>
+                              {t.tipo === "ENTRADA" ? "+ " : "- "}R$ {t.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-3 text-center space-x-2">
+                              <button
+                                onClick={() => handleAprovarTransaction(t.id, t.categoria)}
+                                className="px-2.5 py-1 bg-green-600 hover:bg-green-500 text-black text-[10px] font-bold rounded uppercase transition-colors cursor-pointer"
+                              >
+                                ✅ Aprovar
+                              </button>
+                              <button
+                                onClick={() => handleRejeitarTransaction(t.id)}
+                                className="px-2.5 py-1 bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-800/40 text-[10px] font-bold rounded uppercase transition-colors cursor-pointer"
+                              >
+                                ❌ Rejeitar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Columns layout */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -3074,7 +3299,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800/50">
-                          {transacoes.map((t) => (
+                          {transacoesExibidas.map((t) => (
                             <tr key={t.id} className="hover:bg-[#111622]/30 transition-colors">
                               <td className="py-3 font-mono text-[10px] text-gray-400">
                                 {new Date(t.data_transacao).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
@@ -3083,9 +3308,27 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                                 {t.descricao}
                               </td>
                               <td className="py-3">
-                                <span className="text-[10px] bg-purple-950/20 text-purple-300 border border-purple-800/40 px-2 py-0.5 rounded font-medium">
-                                  {t.categoria}
-                                </span>
+                                <select
+                                  value={t.categoria}
+                                  onChange={(e) => handleUpdateTransactionCategory(t.id, e.target.value)}
+                                  className="text-[10px] bg-[#111622] text-purple-300 border border-purple-800/40 px-2 py-1 rounded font-medium focus:outline-none focus:border-purple-600 cursor-pointer max-w-[140px] truncate"
+                                >
+                                  <option value="Cota Condominial">Cota Condominial</option>
+                                  <option value="Retenção 30% Adsense">Retenção 30% Adsense</option>
+                                  <option value="Tráfego Pago">Tráfego Pago</option>
+                                  <option value="Ferramentas IA">Ferramentas IA</option>
+                                  <option value="Impostos">Impostos</option>
+                                  <option value="Design/Edição">Design/Edição</option>
+                                  <option value="Outros">Outros</option>
+                                  {categorias.map((cat) => (
+                                    !["Cota Condominial", "Retenção 30% Adsense", "Tráfego Pago", "Ferramentas IA", "Impostos", "Design/Edição", "Outros"].includes(cat.nome) && (
+                                      <option key={cat.id} value={cat.nome}>{cat.nome}</option>
+                                    )
+                                  ))}
+                                  {!["Cota Condominial", "Retenção 30% Adsense", "Tráfego Pago", "Ferramentas IA", "Impostos", "Design/Edição", "Outros", ...categorias.map(c => c.nome)].includes(t.categoria) && (
+                                    <option value={t.categoria}>{t.categoria}</option>
+                                  )}
+                                </select>
                               </td>
                               <td className={`py-3 text-right font-bold font-mono ${t.tipo === "ENTRADA" ? "text-green-400" : "text-red-400"}`}>
                                 {t.tipo === "ENTRADA" ? "+ " : "- "}R$ {t.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -3096,10 +3339,12 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                                   className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors cursor-pointer border ${
                                     t.status === "PAGO"
                                       ? "bg-green-950/40 text-green-400 border-green-800/40 hover:bg-green-900/40"
-                                      : "bg-yellow-950/40 text-yellow-400 border-yellow-800/40 hover:bg-yellow-900/40"
+                                      : t.status === "REJEITADO"
+                                      ? "bg-red-950/40 text-red-400 border-red-800/40 hover:bg-red-900/40"
+                                      : "bg-amber-950/40 text-amber-400 border-amber-800/40 hover:bg-amber-900/40"
                                   }`}
                                 >
-                                  {t.status === "PAGO" ? "Pago" : "Pendente"}
+                                  {t.status === "PAGO" ? "Pago" : t.status === "REJEITADO" ? "Rejeitado" : "Aguardando Aprovação"}
                                 </button>
                               </td>
                               <td className="py-3 text-center">
@@ -3114,6 +3359,36 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                  )}
+
+                  {/* Controles de Paginação */}
+                  {totalPaginasTransacoes > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between pt-4 border-t border-gray-800 text-xs text-gray-400 gap-3">
+                      <span>
+                        Mostrando {(paginaAtualTransacoes - 1) * ITENS_POR_PAGINA + 1} a {Math.min(paginaAtualTransacoes * ITENS_POR_PAGINA, transacoes.length)} de {transacoes.length} lançamentos
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={paginaAtualTransacoes <= 1}
+                          onClick={() => setPaginaAtualTransacoes(prev => Math.max(prev - 1, 1))}
+                          className="px-3 py-1 bg-[#111622] hover:bg-[#182030] disabled:opacity-40 text-gray-300 border border-gray-800 rounded font-medium transition-colors cursor-pointer"
+                        >
+                          ← Anterior
+                        </button>
+                        <span className="font-mono text-white px-2">
+                          Página {paginaAtualTransacoes} de {totalPaginasTransacoes}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={paginaAtualTransacoes >= totalPaginasTransacoes}
+                          onClick={() => setPaginaAtualTransacoes(prev => Math.min(prev + 1, totalPaginasTransacoes))}
+                          className="px-3 py-1 bg-[#111622] hover:bg-[#182030] disabled:opacity-40 text-gray-300 border border-gray-800 rounded font-medium transition-colors cursor-pointer"
+                        >
+                          Próximo →
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

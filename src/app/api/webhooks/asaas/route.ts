@@ -60,7 +60,9 @@ export async function POST(request: Request) {
               descricao: `Cota Condominial - ${condomino.nome_comercial} (Ref Asaas: ${paymentId})`,
               valor: valorPago,
               categoria: "Cota Condominial",
-              status: "PAGO",
+              status: "PENDENTE_APROVACAO",
+              origem: "ASAAS",
+              asaas_id: paymentId,
               mes_referencia,
               data_transacao: today.toISOString().split("T")[0]
             });
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         status: "success",
-        message: `Condômino ${condomino.nome_comercial} ativado como adimplente e transação registrada.`,
+        message: `Condômino ${condomino.nome_comercial} ativado como adimplente e transação enviada para aprovação.`,
       });
     } else if (event === "PAYMENT_OVERDUE") {
       // Cláusula 11ª: Suspensão automática por inadimplência

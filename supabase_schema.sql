@@ -104,7 +104,9 @@ CREATE TABLE IF NOT EXISTS public.transacoes_financeiras (
     descricao VARCHAR(255) NOT NULL,
     valor DOUBLE PRECISION NOT NULL,
     categoria VARCHAR(100) NOT NULL, -- Tráfego Pago, Ferramentas IA, Impostos, Cota Condominial, Retenção 30% Adsense, Outros
-    status VARCHAR(50) NOT NULL DEFAULT 'PAGO', -- PAGO, PENDENTE
+    status VARCHAR(50) NOT NULL DEFAULT 'PAGO', -- PAGO, PENDENTE_APROVACAO, REJEITADO
+    origem VARCHAR(50) NOT NULL DEFAULT 'MANUAL', -- MANUAL, ASAAS
+    asaas_id VARCHAR(255),
     mes_referencia VARCHAR(7) NOT NULL, -- Ex: 2026-07
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

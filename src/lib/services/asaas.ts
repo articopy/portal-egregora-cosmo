@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase";
+
 const ASAAS_API_KEY = (process.env.ASAAS_API_KEY || "").trim();
 const ASAAS_API_URL = (process.env.ASAAS_API_URL || "https://sandbox.asaas.com/v3").trim();
 
@@ -178,4 +180,142 @@ export async function checkPaymentStatus(customerId: string): Promise<boolean> {
     console.error("Error checking payment status in Asaas:", err);
   }
   return false;
+}
+
+export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean; importedCount: number; message: string }> {
+  if (!ASAAS_API_KEY) {
+    return { success: false, importedCount: 0, message: "Chave de API do Asaas (ASAAS_API_KEY) não configurada." };
+  }
+
+  let importedCount = 0;
+
+  try {
+    // 1. Buscar pagamentos/cobranças no Asaas
+    const paymentsRes = await fetch(`${ASAAS_API_URL}/payments?limit=100`, {
+      method: "GET",
+      headers: {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (paymentsRes.ok) {
+      const paymentsData = await paymentsRes.json();
+      const paymentsList = paymentsData.data || [];
+
+      for (const item of paymentsList) {
+        // Apenas transações confirmadas ou recebidas
+        if (item.status === "RECEIVED" || item.status === "CONFIRMED") {
+          const asaasId = item.id;
+          const valor = item.value || 0;
+          const dateStr = item.paymentDate || item.clientPaymentDate || item.dueDate || new Date().toISOString().split("T")[0];
+          const transacaoData = new Date(dateStr);
+          const year = transacaoData.getFullYear();
+          const month = String(transacaoData.getMonth() + 1).padStart(2, "0");
+          const mes_referencia = `${year}-${month}`;
+          const desc = item.description 
+            ? `${item.description} (Ref Asaas: ${asaasId})`
+            : `Recebimento Asaas (Ref Asaas: ${asaasId})`;
+
+          // Verifica se já existe transação gravada no texto da descrição ou asaas_id
+          const { data: existingTx } = await supabase
+            .from("transacoes_financeiras")
+            .select("id")
+            .ilike("descricao", `%${asaasId}%`)
+            .maybeSingle();
+
+          if (!existingTx) {
+            const txPayload: any = {
+              tipo: "ENTRADA",
+              descricao: desc,
+              valor: valor,
+              categoria: "Cota Condominial",
+              status: "PENDENTE_APROVACAO",
+              mes_referencia,
+              data_transacao: dateStr,
+              origem: "ASAAS",
+              asaas_id: asaasId,
+            };
+
+            const { error: insErr } = await supabase.from("transacoes_financeiras").insert(txPayload);
+            if (insErr) {
+              // Se falhou por causa das colunas opcionais origem ou asaas_id, tenta sem elas
+              delete txPayload.origem;
+              delete txPayload.asaas_id;
+              await supabase.from("transacoes_financeiras").insert(txPayload);
+            }
+            importedCount++;
+          }
+        }
+      }
+    }
+
+    // 2. Buscar extrato de transações financeiras no Asaas (entradas, transferências, saídas)
+    const finRes = await fetch(`${ASAAS_API_URL}/financialTransactions?limit=100`, {
+      method: "GET",
+      headers: {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (finRes.ok) {
+      const finData = await finRes.json();
+      const finList = finData.data || [];
+
+      for (const item of finList) {
+        const asaasId = item.id;
+        const rawValue = item.value || 0;
+        const isEntrada = rawValue > 0 || (item.type && item.type.includes("RECEIVED"));
+        const absValue = Math.abs(rawValue);
+        if (absValue === 0) continue;
+
+        const dateStr = item.date || new Date().toISOString().split("T")[0];
+        const transacaoData = new Date(dateStr);
+        const year = transacaoData.getFullYear();
+        const month = String(transacaoData.getMonth() + 1).padStart(2, "0");
+        const mes_referencia = `${year}-${month}`;
+        const desc = item.description 
+          ? `${item.description} (Ref Asaas: ${asaasId})`
+          : `Movimentação Asaas (${item.type || "Extrato"}) (Ref Asaas: ${asaasId})`;
+
+        const { data: existingTx } = await supabase
+          .from("transacoes_financeiras")
+          .select("id")
+          .ilike("descricao", `%${asaasId}%`)
+          .maybeSingle();
+
+        if (!existingTx) {
+          const txPayload: any = {
+            tipo: isEntrada ? "ENTRADA" : "SAIDA",
+            descricao: desc,
+            valor: absValue,
+            categoria: isEntrada ? "Cota Condominial" : "Outros",
+            status: "PENDENTE_APROVACAO",
+            mes_referencia,
+            data_transacao: dateStr,
+            origem: "ASAAS",
+            asaas_id: asaasId,
+          };
+
+          const { error: insErr } = await supabase.from("transacoes_financeiras").insert(txPayload);
+          if (insErr) {
+            delete txPayload.origem;
+            delete txPayload.asaas_id;
+            await supabase.from("transacoes_financeiras").insert(txPayload);
+          }
+          importedCount++;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      importedCount,
+      message: `${importedCount} nova(s) movimentação(ões) importada(s) do Asaas para aprovação.`,
+    };
+  } catch (err: any) {
+    console.error("Erro ao sincronizar extrato Asaas:", err);
+    return { success: false, importedCount: 0, message: err.message || "Erro de conexão com Asaas." };
+  }
 }
