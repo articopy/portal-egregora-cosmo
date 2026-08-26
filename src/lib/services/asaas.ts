@@ -182,7 +182,53 @@ export async function checkPaymentStatus(customerId: string): Promise<boolean> {
   return false;
 }
 
-export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean; importedCount: number; message: string }> {
+export async function getAsaasBalance(): Promise<{
+  success: boolean;
+  balance: number;
+  totalAmount?: number;
+  blockedAmount?: number;
+  isMock: boolean;
+}> {
+  if (!ASAAS_API_KEY) {
+    return {
+      success: true,
+      balance: 15420.50,
+      totalAmount: 15420.50,
+      blockedAmount: 0,
+      isMock: true,
+    };
+  }
+
+  try {
+    const res = await fetch(`${ASAAS_API_URL}/finance/balance`, {
+      method: "GET",
+      headers: {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`Error fetching Asaas balance: ${errorText}`);
+      throw new Error(`Asaas Balance Error: ${errorText}`);
+    }
+
+    const data = await res.json();
+    return {
+      success: true,
+      balance: Number(data.balance) || 0,
+      totalAmount: Number(data.totalAmount ?? data.balance) || 0,
+      blockedAmount: Number(data.blockedAmount) || 0,
+      isMock: false,
+    };
+  } catch (err: any) {
+    console.error("Error in getAsaasBalance:", err);
+    throw err;
+  }
+}
+
+export async function syncAsaasTransactionsHistory(mesFiltro?: string): Promise<{ success: boolean; importedCount: number; message: string }> {
   if (!ASAAS_API_KEY) {
     return { success: false, importedCount: 0, message: "Chave de API do Asaas (ASAAS_API_KEY) não configurada." };
   }
@@ -190,7 +236,31 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
   let importedCount = 0;
 
   try {
-    // 1. Buscar pagamentos/cobranças no Asaas
+    // 1. Mapear condôminos do Supabase para vincular pagamentos aos nomes oficiais
+    const { data: conds } = await supabase.from("condominos").select("id, nome_comercial, nome_completo, email, asaas_id");
+    const condominoByAsaasId = new Map<string, any>();
+    const condominoByEmail = new Map<string, any>();
+
+    (conds || []).forEach((c) => {
+      if (c.asaas_id) condominoByAsaasId.set(c.asaas_id, c);
+      if (c.email) condominoByEmail.set(c.email.toLowerCase(), c);
+    });
+
+    // 2. Buscar clientes no Asaas para mapeamento adicional de nomes caso necessário
+    const customerNameMap = new Map<string, string>();
+    try {
+      const cusRes = await fetch(`${ASAAS_API_URL}/customers?limit=100`, {
+        headers: { "access_token": ASAAS_API_KEY, "Content-Type": "application/json" }
+      });
+      if (cusRes.ok) {
+        const cusData = await cusRes.json();
+        (cusData.data || []).forEach((cus: any) => {
+          customerNameMap.set(cus.id, cus.name || cus.email || "Criador");
+        });
+      }
+    } catch (e) {}
+
+    // 3. Buscar pagamentos/cobranças no Asaas (Fonte Oficial da Cota Condominial)
     const paymentsRes = await fetch(`${ASAAS_API_URL}/payments?limit=100`, {
       method: "GET",
       headers: {
@@ -207,24 +277,74 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
         // Apenas transações confirmadas ou recebidas
         if (item.status === "RECEIVED" || item.status === "CONFIRMED") {
           const asaasId = item.id;
-          const valor = item.value || 0;
+          const valor = Number(item.value) || 100;
           const dateStr = item.paymentDate || item.clientPaymentDate || item.dueDate || new Date().toISOString().split("T")[0];
           const transacaoData = new Date(dateStr);
           const year = transacaoData.getFullYear();
           const month = String(transacaoData.getMonth() + 1).padStart(2, "0");
           const mes_referencia = `${year}-${month}`;
-          const desc = item.description 
-            ? `${item.description} (Ref Asaas: ${asaasId})`
-            : `Recebimento Asaas (Ref Asaas: ${asaasId})`;
 
-          // Verifica se já existe transação gravada no texto da descrição ou asaas_id
-          const { data: existingTx } = await supabase
+          // Se um filtro de mês foi passado (ex: 2026-08), ignora transações de outros meses
+          if (mesFiltro && mes_referencia !== mesFiltro) {
+            continue;
+          }
+
+          // Resolver nome padronizado do criador e da playlist
+          const condomino = condominoByAsaasId.get(item.customer) || (item.customerEmail ? condominoByEmail.get(item.customerEmail.toLowerCase()) : null);
+          let creatorDisplayName = "";
+          if (condomino) {
+            if (condomino.nome_comercial && condomino.nome_completo && condomino.nome_comercial !== condomino.nome_completo) {
+              creatorDisplayName = `${condomino.nome_comercial} (${condomino.nome_completo})`;
+            } else {
+              creatorDisplayName = condomino.nome_comercial || condomino.nome_completo || "Criador";
+            }
+          } else {
+            creatorDisplayName = customerNameMap.get(item.customer) || "Criador";
+          }
+
+          const desc = `Cota Condominial - ${creatorDisplayName} (Ref Asaas: ${asaasId})`;
+
+          // Verificação Anti-Duplicidade Rígida:
+          // 1. Por ID de cobrança Asaas
+          // 2. Por mês de referência + nome comercial ou nome completo
+          let isDuplicate = false;
+
+          // Checagem 1: por asaasId
+          const { data: byId } = await supabase
             .from("transacoes_financeiras")
-            .select("id")
-            .ilike("descricao", `%${asaasId}%`)
-            .maybeSingle();
+            .select("id, status")
+            .or(`asaas_id.eq.${asaasId},descricao.ilike.%${asaasId}%`)
+            .limit(1);
 
-          if (!existingTx) {
+          if (byId && byId.length > 0) {
+            isDuplicate = true;
+          }
+
+          // Checagem 2: por condomino no mesmo mês
+          if (!isDuplicate && condomino) {
+            const checks: string[] = [];
+            if (condomino.nome_comercial) {
+              checks.push(`descricao.ilike.%${condomino.nome_comercial}%`);
+            }
+            if (condomino.nome_completo) {
+              checks.push(`descricao.ilike.%${condomino.nome_completo}%`);
+            }
+            if (checks.length > 0) {
+              const { data: byName } = await supabase
+                .from("transacoes_financeiras")
+                .select("id")
+                .eq("mes_referencia", mes_referencia)
+                .eq("categoria", "Cota Condominial")
+                .or(checks.join(","))
+                .limit(1);
+
+              if (byName && byName.length > 0) {
+                isDuplicate = true;
+              }
+            }
+          }
+
+          if (!isDuplicate) {
             const txPayload: any = {
               tipo: "ENTRADA",
               descricao: desc,
@@ -239,7 +359,6 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
 
             const { error: insErr } = await supabase.from("transacoes_financeiras").insert(txPayload);
             if (insErr) {
-              // Se falhou por causa das colunas opcionais origem ou asaas_id, tenta sem elas
               delete txPayload.origem;
               delete txPayload.asaas_id;
               await supabase.from("transacoes_financeiras").insert(txPayload);
@@ -250,7 +369,7 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
       }
     }
 
-    // 2. Buscar extrato de transações financeiras no Asaas (entradas, transferências, saídas)
+    // 4. Buscar extrato de despesas reais / transferências Pix no Asaas
     const finRes = await fetch(`${ASAAS_API_URL}/financialTransactions?limit=100`, {
       method: "GET",
       headers: {
@@ -265,8 +384,19 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
 
       for (const item of finList) {
         const asaasId = item.id;
-        const rawValue = item.value || 0;
-        const isEntrada = rawValue > 0 || (item.type && item.type.includes("RECEIVED"));
+        const rawValue = Number(item.value) || 0;
+        const itemDesc = (item.description || "").toLowerCase();
+
+        // Ignora recebimentos de cobrança (já tratados no /payments)
+        if (rawValue >= 0 || item.paymentId || itemDesc.includes("cobrança recebida") || itemDesc.includes("recebimento asaas")) {
+          continue;
+        }
+
+        // Ignora tarifas e taxas bancárias automáticas de mensageria / boleto / pix
+        if (itemDesc.includes("taxa do pix") || itemDesc.includes("taxa de mensageria") || itemDesc.includes("taxa de boleto") || itemDesc.includes("taxa bancária")) {
+          continue;
+        }
+
         const absValue = Math.abs(rawValue);
         if (absValue === 0) continue;
 
@@ -275,22 +405,25 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
         const year = transacaoData.getFullYear();
         const month = String(transacaoData.getMonth() + 1).padStart(2, "0");
         const mes_referencia = `${year}-${month}`;
-        const desc = item.description 
-          ? `${item.description} (Ref Asaas: ${asaasId})`
-          : `Movimentação Asaas (${item.type || "Extrato"}) (Ref Asaas: ${asaasId})`;
+
+        if (mesFiltro && mes_referencia !== mesFiltro) {
+          continue;
+        }
+
+        const desc = `${item.description || "Transferência / Despesa Asaas"} (Ref Asaas: ${asaasId})`;
 
         const { data: existingTx } = await supabase
           .from("transacoes_financeiras")
           .select("id")
-          .ilike("descricao", `%${asaasId}%`)
-          .maybeSingle();
+          .or(`asaas_id.eq.${asaasId},descricao.ilike.%${asaasId}%`)
+          .limit(1);
 
-        if (!existingTx) {
+        if (!existingTx || existingTx.length === 0) {
           const txPayload: any = {
-            tipo: isEntrada ? "ENTRADA" : "SAIDA",
+            tipo: "SAIDA",
             descricao: desc,
             valor: absValue,
-            categoria: isEntrada ? "Cota Condominial" : "Outros",
+            categoria: "Outros",
             status: "PENDENTE_APROVACAO",
             mes_referencia,
             data_transacao: dateStr,
@@ -312,10 +445,93 @@ export async function syncAsaasTransactionsHistory(): Promise<{ success: boolean
     return {
       success: true,
       importedCount,
-      message: `${importedCount} nova(s) movimentação(ões) importada(s) do Asaas para aprovação.`,
+      message: importedCount > 0 
+        ? `${importedCount} nova(s) movimentação(ões) importada(s) com sucesso para aprovação.`
+        : `Nenhuma nova transação pendente encontrada no Asaas para ${mesFiltro || 'o período'}.`,
     };
   } catch (err: any) {
     console.error("Erro ao sincronizar extrato Asaas:", err);
     return { success: false, importedCount: 0, message: err.message || "Erro de conexão com Asaas." };
   }
 }
+
+export async function cleanupDuplicateTransactions(): Promise<{ success: boolean; removedCount: number; message: string }> {
+  try {
+    const { data: allTransactions, error } = await supabase
+      .from("transacoes_financeiras")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error || !allTransactions) {
+      throw new Error(`Erro ao buscar transações: ${error?.message}`);
+    }
+
+    const idsToDelete: string[] = [];
+    const seenAsaasIds = new Set<string>();
+    const seenCotas = new Map<string, any>(); // key: mes_referencia + normalized_name -> tx
+
+    for (const tx of allTransactions) {
+      // 1. Deduplicação por asaas_id explícito ou ref no texto da descrição
+      let asaasRef = tx.asaas_id;
+      if (!asaasRef && tx.descricao) {
+        const match = tx.descricao.match(/Ref Asaas:\s*([a-zA-Z0-9_]+)/i);
+        if (match && match[1]) {
+          asaasRef = match[1];
+        }
+      }
+
+      if (asaasRef) {
+        if (seenAsaasIds.has(asaasRef)) {
+          idsToDelete.push(tx.id);
+          continue;
+        } else {
+          seenAsaasIds.add(asaasRef);
+        }
+      }
+
+      // 2. Deduplicação de Cota Condominial por mês e criador
+      if (tx.categoria === "Cota Condominial" || (tx.descricao && tx.descricao.toLowerCase().includes("cota condominial"))) {
+        // Extrair parte central do nome
+        const cleanDesc = (tx.descricao || "")
+          .replace(/cota condominial\s*-\s*/i, "")
+          .replace(/\(Ref Asaas:[^)]+\)/i, "")
+          .trim()
+          .toLowerCase();
+
+        const key = `${tx.mes_referencia || "mes"}_${cleanDesc}`;
+        if (seenCotas.has(key)) {
+          const existing = seenCotas.get(key);
+          // Se o atual for REJEITADO ou PENDENTE enquanto o anterior é PAGO, exclui o atual
+          if (existing.status === "PAGO" && tx.status !== "PAGO") {
+            idsToDelete.push(tx.id);
+          } else {
+            // Caso contrário, exclui o mais antigo/duplicado
+            idsToDelete.push(tx.id);
+          }
+          continue;
+        } else {
+          seenCotas.set(key, tx);
+        }
+      }
+    }
+
+    if (idsToDelete.length > 0) {
+      // Executar exclusão em lotes
+      for (const id of idsToDelete) {
+        await supabase.from("transacoes_financeiras").delete().eq("id", id);
+      }
+    }
+
+    return {
+      success: true,
+      removedCount: idsToDelete.length,
+      message: idsToDelete.length > 0
+        ? `Auditoria concluída: ${idsToDelete.length} transação(ões) duplicada(s) removida(s) com sucesso.`
+        : "Auditoria concluída: Nenhuma transação duplicada encontrada no banco de dados.",
+    };
+  } catch (err: any) {
+    console.error("Erro ao limpar duplicidades:", err);
+    return { success: false, removedCount: 0, message: err.message || "Erro durante auditoria de duplicidades." };
+  }
+}
+

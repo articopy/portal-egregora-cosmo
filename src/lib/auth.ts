@@ -1,16 +1,27 @@
-export const adminEmails = [
-  "admin@portal.cosmoalmatv.com.br",
-  "alexandre.p@portal.cosmoalmatv.com.br",
-  "marcos.caram@portal.cosmoalmatv.com.br",
-  "carlos.falcon@portal.cosmoalmatv.com.br"
-];
+export function getAdminEmails(): string[] {
+  const envAdmins = process.env.ADMIN_EMAILS
+    ? process.env.ADMIN_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const defaultAdmins = [
+    "admin@portal.cosmoalmatv.com.br",
+    "alexandre.p@portal.cosmoalmatv.com.br",
+    "marcos.caram@portal.cosmoalmatv.com.br",
+    "carlos.falcon@portal.cosmoalmatv.com.br",
+    "articopyagencia@gmail.com",
+    "marcos.caram@gmail.com",
+    "alexandre.tjk@gmail.com"
+  ];
+  return Array.from(new Set([...defaultAdmins, ...envAdmins]));
+}
+
+export const adminEmails = getAdminEmails();
 
 /**
  * Checks if a given email is in the administrator list.
  */
 export function isEmailAdmin(email?: string): boolean {
   if (!email) return false;
-  return adminEmails.includes(email.toLowerCase());
+  return getAdminEmails().includes(email.toLowerCase());
 }
 
 /**

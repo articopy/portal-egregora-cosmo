@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS public.condominos (
     cidade VARCHAR(100),
     uf VARCHAR(10),
     pais VARCHAR(100) DEFAULT 'Brasil',
+    boas_vindas_enviada BOOLEAN DEFAULT FALSE,
+    boas_vindas_enviada_em TIMESTAMP WITH TIME ZONE,
     data_onboarding TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -142,5 +144,106 @@ INSERT INTO public.categorias_financeiras (nome, tipo) VALUES
 ('Outros', 'SAIDA')
 ON CONFLICT (nome) DO NOTHING;
 
+-- 7. Tabelas da Academia de Treinamentos (Estilo Streaming / LMS)
 
+-- 7.1 Módulos / Trilhas de Treinamento
+CREATE TABLE IF NOT EXISTS public.treinamento_modulos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    titulo VARCHAR(255) NOT NULL,
+    descricao TEXT,
+    icone VARCHAR(50) DEFAULT '🎬',
+    ordem INTEGER DEFAULT 0,
+    obrigatorio BOOLEAN DEFAULT FALSE,
+    ativo BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
 
+ALTER TABLE public.treinamento_modulos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.treinamento_modulos FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.treinamento_modulos FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.treinamento_modulos FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.treinamento_modulos FOR DELETE USING (true);
+
+-- 7.2 Videoaulas do Treinamento
+CREATE TABLE IF NOT EXISTS public.treinamento_aulas (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    modulo_id UUID NOT NULL REFERENCES public.treinamento_modulos(id) ON DELETE CASCADE,
+    titulo VARCHAR(255) NOT NULL,
+    descricao TEXT,
+    video_provider VARCHAR(50) NOT NULL DEFAULT 'youtube', -- 'youtube' ou 'vimeo'
+    video_url VARCHAR(500) NOT NULL,
+    thumbnail_url VARCHAR(500),
+    duracao_minutos INTEGER DEFAULT 0,
+    ordem INTEGER DEFAULT 0,
+    materiais_anexos JSONB DEFAULT '[]'::jsonb, -- [{nome: "Manual.pdf", url: "https://...", tipo: "pdf"}]
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.treinamento_aulas ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.treinamento_aulas FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.treinamento_aulas FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.treinamento_aulas FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.treinamento_aulas FOR DELETE USING (true);
+
+-- 7.3 Progresso dos Criadores
+CREATE TABLE IF NOT EXISTS public.treinamento_progresso (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    condomino_id UUID NOT NULL REFERENCES public.condominos(id) ON DELETE CASCADE,
+    aula_id UUID NOT NULL REFERENCES public.treinamento_aulas(id) ON DELETE CASCADE,
+    concluido BOOLEAN DEFAULT FALSE,
+    concluido_em TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE(condomino_id, aula_id)
+);
+
+ALTER TABLE public.treinamento_progresso ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.treinamento_progresso FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.treinamento_progresso FOR INSERT WITH CHECK (true);
+-- 7.4 Comentários e Dúvidas das Aulas
+CREATE TABLE IF NOT EXISTS public.treinamento_comentarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    aula_id UUID NOT NULL REFERENCES public.treinamento_aulas(id) ON DELETE CASCADE,
+    autor_id VARCHAR(255),
+    autor_nome VARCHAR(255) NOT NULL,
+    autor_role VARCHAR(50) NOT NULL DEFAULT 'creator', -- 'admin' ou 'creator'
+    comentario TEXT NOT NULL,
+    resposta_de_id UUID REFERENCES public.treinamento_comentarios(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.treinamento_comentarios ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all public read" ON public.treinamento_comentarios FOR SELECT USING (true);
+CREATE POLICY "Allow all public insert" ON public.treinamento_comentarios FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all public update" ON public.treinamento_comentarios FOR UPDATE USING (true);
+CREATE POLICY "Allow all public delete" ON public.treinamento_comentarios FOR DELETE USING (true);
+
+-- 7.5 Bucket do Supabase Storage para Materiais de Aula (PDFs, ZIPs, Imagens)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'treinamentos',
+    'treinamentos',
+    true,
+    104857600, -- 100MB
+    ARRAY['application/pdf', 'application/zip', 'application/x-zip-compressed', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/png', 'image/jpeg', 'image/webp', 'text/plain']
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- Políticas de Leitura Pública e Upload de Materiais
+DROP POLICY IF EXISTS "Allow public read on treinamentos storage" ON storage.objects;
+DROP POLICY IF EXISTS "Allow public upload on treinamentos storage" ON storage.objects;
+
+CREATE POLICY "Allow public read on treinamentos storage"
+ON storage.objects FOR SELECT
+USING (bucket_id = 'treinamentos');
+
+CREATE POLICY "Allow public upload on treinamentos storage"
+ON storage.objects FOR INSERT
+WITH CHECK (bucket_id = 'treinamentos');
+
+CREATE POLICY "Allow public update on treinamentos storage"
+ON storage.objects FOR UPDATE
+USING (bucket_id = 'treinamentos');
+
+CREATE POLICY "Allow public delete on treinamentos storage"
+ON storage.objects FOR DELETE
+USING (bucket_id = 'treinamentos');

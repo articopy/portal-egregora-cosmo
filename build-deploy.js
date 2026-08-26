@@ -83,6 +83,20 @@ try {
   const destContratoDir = path.join(DEPLOY_DIR, "Contrato");
   copyFolderSync(contratoDir, destContratoDir);
 
+  // Copiar next.config.mjs e configs
+  if (fs.existsSync(path.join(ROOT_DIR, "next.config.mjs"))) {
+    log("Copiando next.config.mjs...");
+    fs.copyFileSync(path.join(ROOT_DIR, "next.config.mjs"), path.join(DEPLOY_DIR, "next.config.mjs"));
+  }
+  if (fs.existsSync(path.join(ROOT_DIR, "tsconfig.json"))) {
+    log("Copiando tsconfig.json...");
+    fs.copyFileSync(path.join(ROOT_DIR, "tsconfig.json"), path.join(DEPLOY_DIR, "tsconfig.json"));
+  }
+
+  // Criar .npmrc para garantir que o npm install no Hostinger nunca trave em dependências
+  log("Criando .npmrc com legacy-peer-deps...");
+  fs.writeFileSync(path.join(DEPLOY_DIR, ".npmrc"), "legacy-peer-deps=true\n", "utf8");
+
   // Copiar package.json e package-lock.json, modificando o script de build para evitar execução no Hostinger
   log("Copiando e otimizando package.json para o deploy no Hostinger...");
   const pkgPath = path.join(ROOT_DIR, "package.json");
@@ -122,11 +136,13 @@ const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 
 function writeToLogFile(prefix, data) {
   const time = new Date().toISOString();
-  let logData = data.toString();
+  let logData = data ? data.toString() : '';
   if (!logData.endsWith('\\n')) {
     logData += '\\n';
   }
-  logStream.write(\`[\${time}] [\${prefix}] \${logData}\`);
+  try {
+    logStream.write(\`[\${time}] [\${prefix}] \${logData}\`);
+  } catch (e) {}
 }
 
 // Redireciona standard output e standard error
@@ -145,10 +161,14 @@ process.stderr.write = function(chunk, encoding, callback) {
 
 // Captura erros não tratados
 process.on('uncaughtException', (err) => {
-  writeToLogFile('CRITICAL', \`Uncaught Exception: \${err.stack || err}\\n\`);
-  logStream.end(() => {
+  writeToLogFile('CRITICAL', \`Uncaught Exception: \${err ? err.stack || err : 'Unknown error'}\\n\`);
+  try {
+    logStream.end(() => {
+      process.exit(1);
+    });
+  } catch (e) {
     process.exit(1);
-  });
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -160,22 +180,30 @@ console.log('Node Version:', process.version);
 console.log('Platform:', process.platform);
 console.log('Working Directory:', __dirname);
 console.log('PORT env:', process.env.PORT);
-console.log('UV_THREADPOOL_SIZE:', process.env.UV_THREADPOOL_SIZE);
-console.log('NODE_OPTIONS:', process.env.NODE_OPTIONS);
 
-// Agora importamos os outros pacotes que podem falhar dependendo da versão do Node ou dependências ausentes
+// Verificação de segurança de dependências
+if (!fs.existsSync(path.join(__dirname, 'node_modules', 'next'))) {
+  console.error('[ERRO FATAL] Pasta node_modules ou pacote next ausente! Por favor, execute "npm install" no painel da Hostinger.');
+  writeToLogFile('CRITICAL', 'Pacote "next" nao encontrado em node_modules. Execute "npm install" no painel.');
+}
+
 const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 
 const dev = false;
-const app = next({ dev, dir: __dirname });
-const handle = app.getRequestHandler();
-
 const port = process.env.PORT || 3000;
-const host = '0.0.0.0';
-
 const isNumeric = !isNaN(port) && !isNaN(parseFloat(port));
+const hostname = isNumeric ? '0.0.0.0' : 'localhost';
+
+const app = next({
+  dev: false,
+  dir: __dirname,
+  hostname,
+  port: isNumeric ? Number(port) : 3000
+});
+
+const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   console.log('Next.js app preparado com sucesso.');
@@ -185,12 +213,12 @@ app.prepare().then(() => {
   });
 
   if (isNumeric) {
-    server.listen(Number(port), host, (err) => {
+    server.listen(Number(port), hostname, (err) => {
       if (err) throw err;
-      console.log(\`> Ready on port \${port} on \${host}\`);
+      console.log(\`> Ready on port \${port} on \${hostname}\`);
     });
   } else {
-    // Se for Unix socket, escuta diretamente no caminho do arquivo
+    // Se for Unix socket do Passenger (caminho em arquivo ou pipe)
     server.listen(port, (err) => {
       if (err) throw err;
       console.log(\`> Ready on socket \${port}\`);
@@ -198,6 +226,7 @@ app.prepare().then(() => {
   }
 }).catch((err) => {
   console.error('Erro durante a preparação do app Next.js:', err);
+  writeToLogFile('CRITICAL', \`Erro app.prepare(): \${err ? err.stack || err : err}\\n\`);
   process.exit(1);
 });
 `;

@@ -97,6 +97,25 @@ export default function EgrégoraCMS() {
   const [novaTransacaoLoading, setNovaTransacaoLoading] = useState(false);
   const [paginaAtualTransacoes, setPaginaAtualTransacoes] = useState(1);
 
+  // Asaas real-time balance & reconciliation states
+  const [asaasBalance, setAsaasBalance] = useState<{
+    saldoAsaasReal: number;
+    saldoAsaasBloqueado: number;
+    saldoAsaasTotal: number;
+    saldoSistemaAcumulado: number;
+    totalEntradasAcumulado: number;
+    totalSaidasAcumulado: number;
+    diferencaConciliacao: number;
+    isConciliado: boolean;
+    isMock: boolean;
+  } | null>(null);
+  const [loadingAsaasBalance, setLoadingAsaasBalance] = useState(false);
+  const [deduplicandoLoading, setDeduplicandoLoading] = useState(false);
+
+  // Relatório Executivo para Sócios
+  const [isExecutiveReportOpen, setIsExecutiveReportOpen] = useState(false);
+  const [relatorioComentarios, setRelatorioComentarios] = useState("");
+
   // Categorias states
   const [categorias, setCategorias] = useState<any[]>([]);
   const [isCategoriasModalOpen, setIsCategoriasModalOpen] = useState(false);
@@ -768,6 +787,27 @@ export default function EgrégoraCMS() {
 
   const [syncingAsaas, setSyncingAsaas] = useState(false);
 
+  const fetchAsaasBalance = async () => {
+    try {
+      setLoadingAsaasBalance(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/asaas-balance`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAsaasBalance(data);
+      }
+    } catch (err) {
+      console.error("Erro ao buscar saldo Asaas:", err);
+    } finally {
+      setLoadingAsaasBalance(false);
+    }
+  };
+
   const handleSincronizarAsaas = async () => {
     try {
       setSyncingAsaas(true);
@@ -778,14 +818,17 @@ export default function EgrégoraCMS() {
       const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/sincronizar-asaas`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${token}`
-        }
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ mes: filtroMes })
       });
 
       const data = await res.json();
       if (res.ok && data.success) {
         alert(data.message || "Extrato Asaas sincronizado!");
         await fetchTransacoes(filtroMes);
+        await fetchAsaasBalance();
       } else {
         alert(data.message || data.detail || "Erro ao sincronizar extrato Asaas.");
       }
@@ -795,6 +838,68 @@ export default function EgrégoraCMS() {
     } finally {
       setSyncingAsaas(false);
     }
+  };
+
+  const handleDeduplicarTransacoes = async () => {
+    if (!confirm("Deseja executar a auditoria anti-duplicidade? Isso removerá cobranças/cotas duplicadas antigas no banco de dados.")) return;
+    try {
+      setDeduplicandoLoading(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`${API_BASE_URL}/api/admin/financeiro/deduplicar`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json"
+        }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message);
+        await fetchTransacoes(filtroMes);
+        await fetchAsaasBalance();
+      } else {
+        alert(data.message || data.detail || "Erro ao executar auditoria.");
+      }
+    } catch (err) {
+      console.error("Erro ao conectar:", err);
+      alert("Erro de conexão com o servidor.");
+    } finally {
+      setDeduplicandoLoading(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    const transacoesPagas = transacoes.filter((t) => t.status === "PAGO");
+    if (transacoesPagas.length === 0) {
+      alert("Nenhuma transação paga para exportar neste mês.");
+      return;
+    }
+
+    const headers = ["ID", "Data", "Tipo", "Descricao", "Categoria", "Valor (R$)", "Status", "Origem", "Mes Referencia"];
+    const rows = transacoesPagas.map(t => [
+      t.id,
+      t.data_transacao,
+      t.tipo,
+      `"${(t.descricao || "").replace(/"/g, '""')}"`,
+      `"${(t.categoria || "").replace(/"/g, '""')}"`,
+      t.valor.toFixed(2),
+      t.status,
+      t.origem || "MANUAL",
+      t.mes_referencia
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `extrato_financeiro_${filtroMes}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const fetchCategorias = async () => {
@@ -992,6 +1097,8 @@ export default function EgrégoraCMS() {
       if (session?.user) {
         setCurrentUser(session.user);
         await determineUserRoleAndCreator(session.user);
+        fetchTransacoes();
+        fetchAsaasBalance();
       } else {
         setCurrentUser(null);
         setUserRole(null);
@@ -1006,6 +1113,8 @@ export default function EgrégoraCMS() {
       if (session?.user) {
         setCurrentUser(session.user);
         await determineUserRoleAndCreator(session.user);
+        fetchTransacoes();
+        fetchAsaasBalance();
       } else {
         setCurrentUser(null);
         setUserRole(null);
@@ -1017,6 +1126,7 @@ export default function EgrégoraCMS() {
     fetchCondominos();
     fetchFechamentos();
     fetchTransacoes();
+    fetchAsaasBalance();
     fetchCategorias();
     fetchConfigs();
     fetchYoutubeStats();
@@ -1571,7 +1681,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
     <div className={`min-h-screen bg-[#111622] nebula-gradient flex font-sans ${currentUser ? 'flex-col md:flex-row' : 'flex-col'}`}>
       {/* Conditionally render: sidebar for logged-in, or top header for guest */}
       {!currentUser ? (
-        <header className="border-b border-[#E2B042]/20 py-4 px-6 md:px-12 flex flex-col md:flex-row justify-between items-center bg-[#1A1D29]/75 backdrop-blur-md sticky top-0 z-50 w-full">
+        <header className="border-b border-[#E2B042]/20 py-4 px-6 md:px-12 flex flex-col md:flex-row justify-between items-center bg-[#1A1D29]/75 backdrop-blur-md sticky top-0 z-50 w-full print:hidden">
           <div className="flex items-center gap-3 mb-4 md:mb-0">
             <img
               src="/logo.png"
@@ -1611,7 +1721,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
       ) : (
         <>
           {/* Mobile Top Bar */}
-          <header className="md:hidden border-b border-[#E2B042]/20 py-3 px-4 flex justify-between items-center bg-[#1A1D29]/90 sticky top-0 z-50 w-full shrink-0">
+          <header className="md:hidden border-b border-[#E2B042]/20 py-3 px-4 flex justify-between items-center bg-[#1A1D29]/90 sticky top-0 z-50 w-full shrink-0 print:hidden">
             <div className="flex items-center gap-2">
               <img src="/logo.png" alt="Logo" className="h-8 w-8 object-contain rounded-full border border-[#E2B042]/30 p-0.5 bg-[#111622]" />
               <div>
@@ -1637,7 +1747,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
           </header>
 
           {/* Sidebar Nav - Desktop (Persistent) & Mobile (Drawer) */}
-          <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#1A1D29]/95 border-r border-[#E2B042]/20 flex flex-col justify-between transition-transform duration-300 md:translate-x-0 md:static md:h-screen shrink-0 ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
+          <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-[#1A1D29]/95 border-r border-[#E2B042]/20 flex flex-col justify-between transition-transform duration-300 md:translate-x-0 md:static md:h-screen shrink-0 print:hidden ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}`}>
             <div>
               {/* Logo Branding */}
               <div className="flex items-center gap-3 py-6 px-6 border-b border-gray-800">
@@ -1686,7 +1796,7 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 {/* Financeiro tab */}
                 {userRole === "admin" && (
                   <button
-                    onClick={() => { setActiveTab("financeiro"); setIsMobileMenuOpen(false); fetchTransacoes(); }}
+                    onClick={() => { setActiveTab("financeiro"); setIsMobileMenuOpen(false); fetchTransacoes(); fetchAsaasBalance(); }}
                     className={`w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer ${
                       activeTab === "financeiro"
                         ? "bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
@@ -1717,6 +1827,21 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     }`}
                   >
                     <span>🧘</span> ÁREA DO CRIADOR
+                  </button>
+                )}
+
+                {/* Academia Cosmo / Treinamentos (Acesso Geral) */}
+                {(userRole === "admin" || userRole === "creator") && (
+                  <button
+                    onClick={() => { router.push('/treinamentos'); setIsMobileMenuOpen(false); }}
+                    className="w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center justify-between gap-2 cursor-pointer text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/20 group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>🎬</span> ACADEMIA COSMO
+                    </div>
+                    <span className="px-1.5 py-0.5 text-[9px] font-bold bg-[#E2B042]/20 text-[#E2B042] border border-[#E2B042]/40 rounded-full group-hover:bg-[#E2B042] group-hover:text-black transition-colors">
+                      AULAS
+                    </span>
                   </button>
                 )}
 
@@ -2968,80 +3093,440 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
           const totalSaidas = transacoesPagas.reduce((acc, t) => t.tipo === "SAIDA" ? acc + t.valor : acc, 0);
           const saldoLiquido = totalEntradas - totalSaidas;
 
+          // Breakdown of expenses by category
+          const categoryMap: { [cat: string]: number } = {};
+          transacoesPagas.filter(t => t.tipo === "SAIDA").forEach(t => {
+            const cat = t.categoria || "Outros";
+            categoryMap[cat] = (categoryMap[cat] || 0) + (Number(t.valor) || 0);
+          });
+
+          const PALETTE = ["#E2B042", "#805AD5", "#3182CE", "#38A169", "#DD6B20", "#E53E3E", "#D53F8C", "#4FD1C5", "#718096"];
+
+          const despesasPorCategoria = Object.keys(categoryMap).map((catName, idx) => ({
+            nome: catName,
+            total: categoryMap[catName],
+            percentual: totalSaidas > 0 ? (categoryMap[catName] / totalSaidas) * 100 : 0,
+            cor: PALETTE[idx % PALETTE.length]
+          })).sort((a, b) => b.total - a.total);
+
+          // Income Breakdown
+          const totalCotas = transacoesPagas
+            .filter(t => t.tipo === "ENTRADA" && (t.categoria === "Cota Condominial" || (t.descricao && t.descricao.toLowerCase().includes("cota"))))
+            .reduce((sum, t) => sum + (Number(t.valor) || 0), 0);
+
+          const totalAdsense = transacoesPagas
+            .filter(t => t.tipo === "ENTRADA" && t.categoria === "Retenção 30% Adsense")
+            .reduce((sum, t) => sum + (Number(t.valor) || 0), 0);
+
+          const totalOutrasEntradas = Math.max(0, totalEntradas - totalCotas - totalAdsense);
+
+          // Cotas compliance
+          const cotasPagasCount = transacoesPagas.filter(t => t.tipo === "ENTRADA" && (t.categoria === "Cota Condominial" || (t.descricao && t.descricao.toLowerCase().includes("cota")))).length;
+          const totalCondominosCount = condominos.length || 1;
+          const taxaAdimplencia = Math.min(100, Math.round((cotasPagasCount / totalCondominosCount) * 100));
+
+          // Reconciliation & Asaas data
+          const saldoAsaasReal = asaasBalance?.saldoAsaasReal ?? saldoLiquido;
+          const saldoSistemaAcumulado = asaasBalance?.saldoSistemaAcumulado ?? saldoLiquido;
+          const diferencaConciliacao = asaasBalance?.diferencaConciliacao ?? 0;
+          const isConciliado = asaasBalance ? asaasBalance.isConciliado : true;
+
+          // Donut chart calculations (Circumference of r=38 is ~238.76)
+          const donutCircumference = 238.76;
+          let currentOffset = 0;
+
           return (
-            <div className="space-y-8 animate-fadeIn">
+            <div className="space-y-8 animate-fadeIn print:hidden">
               
-              {/* Filter & Month Selector */}
-              <div className="flex flex-col sm:flex-row justify-between items-center bg-[#1A1D29] border border-gray-800 p-4 rounded-xl gap-4">
+              {/* Filter, Month Selector & Action Buttons */}
+              <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-[#1A1D29] border border-gray-800 p-4 rounded-xl gap-4">
                 <div>
-                  <h2 className="text-md font-semibold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)]">
-                    Controle de Caixa e Finanças
-                  </h2>
-                  <p className="text-[10px] text-gray-500">Gestão integrada de entradas, saídas e reservas operacionais</p>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-md font-semibold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)]">
+                      Controle Financeiro & Conciliação Bancária
+                    </h2>
+                    {asaasBalance && (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${isConciliado ? 'bg-green-950/60 text-green-400 border border-green-800/60' : 'bg-amber-950/60 text-amber-300 border border-amber-800/60'}`}>
+                        {isConciliado ? "🟢 100% Conciliado" : "🟡 Divergência de Caixa"}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-0.5">Encontro de contas fiel integrado ao banco Asaas e relatórios executivos para sócios</p>
                 </div>
-                 <div className="flex items-center gap-2 print:hidden">
+
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     disabled={syncingAsaas}
                     onClick={handleSincronizarAsaas}
-                    className="px-3 py-1.5 bg-blue-950/40 hover:bg-blue-900/50 disabled:bg-gray-800 text-blue-300 border border-blue-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer mr-1 flex items-center gap-1.5"
+                    className="px-3 py-2 bg-blue-950/40 hover:bg-blue-900/50 disabled:bg-gray-800 text-blue-300 border border-blue-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Sincronizar pagamentos e transferências da conta Asaas"
                   >
                     {syncingAsaas ? (
                       <>
                         <span className="animate-spin text-xs">🌀</span> Sincronizando...
                       </>
                     ) : (
-                      <>🔄 Sincronizar Extrato Asaas</>
+                      <>🔄 Sincronizar Asaas</>
                     )}
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => window.print()}
-                    className="px-3 py-1.5 bg-purple-950/40 hover:bg-purple-900/40 text-purple-300 border border-purple-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer mr-2"
+                    disabled={deduplicandoLoading}
+                    onClick={handleDeduplicarTransacoes}
+                    className="px-3 py-2 bg-amber-950/30 hover:bg-amber-900/40 disabled:bg-gray-800 text-amber-300 border border-amber-800/30 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Auditar e remover duplicidades de cotas e transações"
                   >
-                    📄 Exportar PDF
+                    {deduplicandoLoading ? (
+                      <>
+                        <span className="animate-spin text-xs">🌀</span> Auditando...
+                      </>
+                    ) : (
+                      <>🧹 Auditar Duplicidades</>
+                    )}
                   </button>
-                  <label className="text-xs text-gray-400 uppercase tracking-wide font-medium">Mês de Referência:</label>
-                  <input
-                    type="month"
-                    value={filtroMes}
-                    onChange={(e) => {
-                      setFiltroMes(e.target.value);
-                      fetchTransacoes(e.target.value);
-                    }}
-                    className="bg-[#111622] border border-gray-800 text-white rounded-lg p-2 text-xs focus:border-[#E2B042] focus:outline-none"
-                  />
+
+                  <button
+                    type="button"
+                    onClick={handleExportCSV}
+                    className="px-3 py-2 bg-emerald-950/40 hover:bg-emerald-900/40 text-emerald-300 border border-emerald-800/40 text-xs font-bold rounded-lg uppercase tracking-wide transition-all cursor-pointer flex items-center gap-1.5"
+                    title="Exportar extrato do mês em formato CSV / Planilha"
+                  >
+                    📥 Exportar CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsExecutiveReportOpen(true)}
+                    className="px-3.5 py-2 bg-gradient-to-r from-[#E2B042] to-[#F6E05E] hover:from-[#D69E2E] hover:to-[#ECC94B] text-black text-xs font-extrabold rounded-lg uppercase tracking-wider transition-all shadow-[0_2px_10px_rgba(226,176,66,0.2)] cursor-pointer flex items-center gap-1.5"
+                  >
+                    📊 Apresentação aos Sócios (PDF)
+                  </button>
+
+                  <div className="flex items-center gap-1.5 pl-2 border-l border-gray-800">
+                    <label className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold">Mês:</label>
+                    <input
+                      type="month"
+                      value={filtroMes}
+                      onChange={(e) => {
+                        setFiltroMes(e.target.value);
+                        fetchTransacoes(e.target.value);
+                      }}
+                      className="bg-[#111622] border border-gray-800 text-white rounded-lg px-2.5 py-1.5 text-xs focus:border-[#E2B042] focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Total de Entradas</span>
-                  <span className="text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#38A169]">
+              {/* Summary Cards & Bank Reconciliation (Encontro de Contas) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                
+                {/* 1. Saldo Real em Conta Asaas */}
+                <div className="bg-[#1A1D29] border border-blue-900/40 p-5 rounded-xl mystic-glow relative overflow-hidden bg-gradient-to-br from-[#1A1D29] via-[#161B29] to-[#121E33]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase tracking-wider text-blue-300 font-semibold flex items-center gap-1">
+                      <span>🏦</span> Saldo Real em Conta (Asaas)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={fetchAsaasBalance}
+                      disabled={loadingAsaasBalance}
+                      className="text-[10px] text-blue-400 hover:text-blue-200 transition-colors cursor-pointer disabled:opacity-50"
+                      title="Atualizar saldo bancário do Asaas agora"
+                    >
+                      {loadingAsaasBalance ? "🌀..." : "🔄 Atualizar"}
+                    </button>
+                  </div>
+                  <span className="text-2xl lg:text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-blue-400 block">
+                    {loadingAsaasBalance && !asaasBalance ? (
+                      <span className="text-xs text-gray-400 animate-pulse">Consultando banco...</span>
+                    ) : (
+                      `R$ ${(asaasBalance?.saldoAsaasReal ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    )}
+                  </span>
+                  <div className="mt-2 pt-2 border-t border-gray-800/80 flex flex-col gap-0.5 text-[10px]">
+                    <div className="flex justify-between text-gray-400">
+                      <span>Status Reconciliação:</span>
+                      <span className={isConciliado ? "text-green-400 font-bold" : "text-amber-400 font-bold"}>
+                        {isConciliado ? "🟢 Bateu 100%" : `🟡 Dif. R$ ${Math.abs(diferencaConciliacao).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                      </span>
+                    </div>
+                    {asaasBalance && asaasBalance.saldoAsaasBloqueado > 0 ? (
+                      <div className="flex justify-between text-gray-500">
+                        <span>A liberar/bloqueado:</span>
+                        <span>R$ {asaasBalance.saldoAsaasBloqueado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-gray-500">
+                        <span>Origem dos Dados:</span>
+                        <span className="text-blue-300/80 font-mono">API Oficial Asaas</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Total de Entradas do Mês */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl mystic-glow relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400">Entradas ({filtroMes})</span>
+                    <span className="text-xs">📈</span>
+                  </div>
+                  <span className="text-2xl lg:text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#38A169] block">
                     R$ {totalEntradas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
-                  <span className="text-[10px] text-gray-500 block mt-1">Cotas recebidas + retornos de Adsense</span>
-                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">📈</div>
+                  <div className="mt-2 pt-2 border-t border-gray-800/80 flex justify-between text-[10px] text-gray-400">
+                    <span>Cotas: R$ {totalCotas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span>Adsense: R$ {totalAdsense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
 
-                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Total de Saídas</span>
-                  <span className="text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#E53E3E]">
+                {/* 3. Total de Saídas do Mês */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl mystic-glow relative overflow-hidden">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400">Saídas ({filtroMes})</span>
+                    <span className="text-xs">📉</span>
+                  </div>
+                  <span className="text-2xl lg:text-3xl font-bold font-[family-name:var(--font-josefin-sans)] text-[#E53E3E] block">
                     R$ {totalSaidas.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
-                  <span className="text-[10px] text-gray-500 block mt-1">Tráfego pago, softwares e custos operacionais</span>
-                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">📉</div>
+                  <div className="mt-2 pt-2 border-t border-gray-800/80 flex justify-between text-[10px] text-gray-400">
+                    <span>{transacoesPagas.filter(t => t.tipo === "SAIDA").length} lançamentos pagos</span>
+                    <span className="text-red-400/80">Despesas operacionais</span>
+                  </div>
                 </div>
 
-                <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden border-l-4 border-l-[#E2B042]">
-                  <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-1">Saldo Líquido</span>
-                  <span className={`text-3xl font-bold font-[family-name:var(--font-josefin-sans)] ${saldoLiquido >= 0 ? 'text-[#E2B042]' : 'text-red-400'}`}>
+                {/* 4. Saldo Líquido do Mês & Acumulado */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl mystic-glow relative overflow-hidden border-l-4 border-l-[#E2B042]">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400">Resultado do Mês</span>
+                    <span className="text-xs">⚖️</span>
+                  </div>
+                  <span className={`text-2xl lg:text-3xl font-bold font-[family-name:var(--font-josefin-sans)] block ${saldoLiquido >= 0 ? 'text-[#E2B042]' : 'text-red-400'}`}>
                     R$ {saldoLiquido.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
-                  <span className="text-[10px] text-gray-500 block mt-1">Disponível no caixa de gestão</span>
-                  <div className="absolute right-4 bottom-4 text-2xl opacity-20">⚖️</div>
+                  <div className="mt-2 pt-2 border-t border-gray-800/80 flex justify-between text-[10px] text-gray-400">
+                    <span>Acumulado Histórico:</span>
+                    <span className="text-white font-mono font-semibold">
+                      R$ {saldoSistemaAcumulado.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
                 </div>
+
+              </div>
+
+              {/* Visual Analytics & Executive Charts Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Chart 1: Donut de Despesas por Categoria */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl space-y-4">
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                    <h3 className="text-xs font-bold text-[#E2B042] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)] flex items-center gap-1.5">
+                      <span>🍩</span> Despesas por Categoria
+                    </h3>
+                    <span className="text-[10px] text-gray-400 font-mono bg-[#111622] px-2 py-0.5 rounded border border-gray-800">
+                      Total: R$ {totalSaidas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+
+                  {despesasPorCategoria.length === 0 ? (
+                    <div className="py-12 text-center text-gray-500 text-xs italic">
+                      Nenhuma despesa lançada para {filtroMes}.
+                    </div>
+                  ) : (
+                    <div className="space-y-4 pt-1">
+                      {/* Top Visual Section: Donut + Highlight */}
+                      <div className="flex items-center justify-around bg-[#111622]/60 p-3 rounded-xl border border-gray-850">
+                        {/* SVG Donut */}
+                        <div className="relative w-28 h-28 shrink-0 flex items-center justify-center">
+                          <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                            <circle
+                              cx="50"
+                              cy="50"
+                              r="38"
+                              fill="transparent"
+                              stroke="#1E2333"
+                              strokeWidth="14"
+                            />
+                            {despesasPorCategoria.map((item) => {
+                              const strokeDash = (item.percentual / 100) * donutCircumference;
+                              const strokeGap = donutCircumference - strokeDash;
+                              const strokeOffset = -currentOffset;
+                              currentOffset += strokeDash;
+
+                              return (
+                                <circle
+                                  key={item.nome}
+                                  cx="50"
+                                  cy="50"
+                                  r="38"
+                                  fill="transparent"
+                                  stroke={item.cor}
+                                  strokeWidth="14"
+                                  strokeDasharray={`${strokeDash} ${strokeGap}`}
+                                  strokeDashoffset={strokeOffset}
+                                  className="transition-all duration-500"
+                                />
+                              );
+                            })}
+                          </svg>
+                          <div className="absolute flex flex-col items-center justify-center text-center pointer-events-none">
+                            <span className="text-[9px] uppercase tracking-wider text-gray-400 font-medium">Saídas</span>
+                            <span className="text-xs font-bold text-white font-mono">
+                              {despesasPorCategoria.length} cat.
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1 text-right">
+                          <span className="text-[10px] text-gray-400 block uppercase">Maior Custo</span>
+                          <span className="text-xs font-bold text-[#E2B042] block truncate max-w-[140px]" title={despesasPorCategoria[0]?.nome}>
+                            {despesasPorCategoria[0]?.nome || "N/A"}
+                          </span>
+                          <span className="text-xs font-mono font-bold text-white">
+                            R$ {(despesasPorCategoria[0]?.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detailed Category List with Full Names and Progress Bars */}
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {despesasPorCategoria.map((item) => (
+                          <div key={item.nome} className="bg-[#111622] p-2.5 rounded-lg border border-gray-800 space-y-1.5 hover:border-gray-700 transition-colors">
+                            <div className="flex justify-between items-center text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_6px_rgba(226,176,66,0.3)]" style={{ backgroundColor: item.cor }}></span>
+                                <span className="text-white font-medium text-xs">{item.nome}</span>
+                              </div>
+                              <div className="text-right font-mono text-xs">
+                                <span className="text-white font-bold">R$ {item.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                <span className="text-gray-400 text-[10px] ml-1.5 font-semibold">({item.percentual.toFixed(1)}%)</span>
+                              </div>
+                            </div>
+                            {/* Progress bar */}
+                            <div className="w-full bg-gray-900 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-500"
+                                style={{ width: `${item.percentual}%`, backgroundColor: item.cor }}
+                              ></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chart 2: Composição de Receitas & Adimplência de Cotas */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl space-y-4">
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                    <h3 className="text-xs font-bold text-[#38A169] uppercase tracking-wider font-[family-name:var(--font-josefin-sans)] flex items-center gap-1.5">
+                      <span>🎯</span> Adimplência & Receitas
+                    </h3>
+                    <span className="text-[10px] text-gray-500 font-mono">{cotasPagasCount} de {totalCondominosCount} cotas</span>
+                  </div>
+
+                  {/* Adimplência Card */}
+                  <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-gray-300 font-medium">Taxa de Adimplência de Cotas</span>
+                      <span className={`font-bold font-mono text-sm ${taxaAdimplencia >= 80 ? 'text-green-400' : taxaAdimplencia >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                        {taxaAdimplencia}%
+                      </span>
+                    </div>
+                    {/* Progress Bar */}
+                    <div className="w-full bg-gray-900 rounded-full h-3 overflow-hidden border border-gray-800">
+                      <div
+                        className={`h-full transition-all duration-700 ${taxaAdimplencia >= 80 ? 'bg-gradient-to-r from-green-500 to-emerald-400' : taxaAdimplencia >= 50 ? 'bg-gradient-to-r from-amber-500 to-yellow-400' : 'bg-gradient-to-r from-red-600 to-rose-400'}`}
+                        style={{ width: `${taxaAdimplencia}%` }}
+                      ></div>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-gray-500">
+                      <span>{cotasPagasCount} condôminos adimplentes</span>
+                      <span>{Math.max(0, totalCondominosCount - cotasPagasCount)} pendentes</span>
+                    </div>
+                  </div>
+
+                  {/* Income Composition Bars */}
+                  <div className="space-y-2.5 pt-1">
+                    <span className="text-[10px] uppercase tracking-wider text-gray-400 block font-semibold">Composição das Entradas</span>
+                    
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs text-gray-300">
+                        <span className="flex items-center gap-1.5"><span>🏛️</span> Cotas Condominiais:</span>
+                        <span className="font-mono text-green-400 font-bold">R$ {totalCotas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="w-full bg-gray-900 rounded-full h-2 overflow-hidden border border-gray-800">
+                        <div className="bg-[#38A169] h-full" style={{ width: `${totalEntradas > 0 ? (totalCotas / totalEntradas) * 100 : 0}%` }}></div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs text-gray-300">
+                        <span className="flex items-center gap-1.5"><span>🎬</span> Retenção 30% Adsense:</span>
+                        <span className="font-mono text-purple-400 font-bold">R$ {totalAdsense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="w-full bg-gray-900 rounded-full h-2 overflow-hidden border border-gray-800">
+                        <div className="bg-[#805AD5] h-full" style={{ width: `${totalEntradas > 0 ? (totalAdsense / totalEntradas) * 100 : 0}%` }}></div>
+                      </div>
+                    </div>
+
+                    {totalOutrasEntradas > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs text-gray-300">
+                          <span className="flex items-center gap-1.5"><span>✨</span> Outras Entradas:</span>
+                          <span className="font-mono text-blue-400 font-bold">R$ {totalOutrasEntradas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="w-full bg-gray-900 rounded-full h-2 overflow-hidden border border-gray-800">
+                          <div className="bg-[#3182CE] h-full" style={{ width: `${totalEntradas > 0 ? (totalOutrasEntradas / totalEntradas) * 100 : 0}%` }}></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Chart 3: DRE Sintético do Exercício */}
+                <div className="bg-[#1A1D29] border border-gray-800 p-5 rounded-xl space-y-3">
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-3">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider font-[family-name:var(--font-josefin-sans)] flex items-center gap-1.5">
+                      <span>📑</span> DRE Gerencial Sintético
+                    </h3>
+                    <span className="text-[10px] text-gray-500 font-mono">Exercício {filtroMes}</span>
+                  </div>
+
+                  <div className="space-y-2 text-xs divide-y divide-gray-800/60 font-mono">
+                    <div className="flex justify-between py-1.5 text-gray-300">
+                      <span className="font-sans">(+) Cotas Condominiais</span>
+                      <span className="text-green-400 font-semibold">+ R$ {totalCotas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 text-gray-300">
+                      <span className="font-sans">(+) Retenção Adsense 30%</span>
+                      <span className="text-green-400 font-semibold">+ R$ {totalAdsense.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 bg-[#111622] px-2 rounded font-bold text-white">
+                      <span className="font-sans">(=) Receita Operacional Bruta</span>
+                      <span className="text-green-400">R$ {totalEntradas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 text-gray-300">
+                      <span className="font-sans">(-) Custos & Despesas Operacionais</span>
+                      <span className="text-red-400 font-semibold">- R$ {totalSaidas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between py-2 bg-gradient-to-r from-amber-950/30 to-[#1A1D29] px-2 rounded border border-[#E2B042]/30 font-bold">
+                      <span className="font-sans text-[#E2B042]">(=) Resultado Líquido do Mês</span>
+                      <span className={saldoLiquido >= 0 ? "text-[#E2B042]" : "text-red-400"}>
+                        R$ {saldoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 text-[10px] text-gray-500 flex justify-between items-center">
+                    <span>Margem Operacional Líquida:</span>
+                    <span className={`font-bold font-mono ${saldoLiquido >= 0 ? 'text-[#E2B042]' : 'text-red-400'}`}>
+                      {totalEntradas > 0 ? ((saldoLiquido / totalEntradas) * 100).toFixed(1) : "0.0"}%
+                    </span>
+                  </div>
+                </div>
+
               </div>
 
               {/* Movimentações Pendentes de Aprovação (Asaas / Caixa) */}
@@ -3133,13 +3618,13 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 </div>
               )}
 
-              {/* Columns layout */}
+              {/* Columns layout: Launch Form + History */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 
                 {/* Form to Launch Transaction */}
                 <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4 h-fit">
                   <h3 className="text-sm font-semibold tracking-wider uppercase text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                    Lançar Transação
+                    Lançar Transação Manual
                   </h3>
                   <form onSubmit={handleLaunchTransaction} className="space-y-4">
                     <div>
@@ -3273,9 +3758,12 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
 
                 {/* Transactions List */}
                 <div className="lg:col-span-2 bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                  <h3 className="text-sm font-semibold tracking-wider uppercase text-gray-400">
-                    Histórico de Lançamentos ({filtroMes})
-                  </h3>
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-sm font-semibold tracking-wider uppercase text-gray-400">
+                      Histórico de Lançamentos ({filtroMes})
+                    </h3>
+                    <span className="text-[10px] text-gray-500 font-mono">{transacoes.length} transação(ões) no período</span>
+                  </div>
 
                   {financeiroLoading ? (
                     <div className="text-center py-10 text-gray-500 text-xs italic">
@@ -3477,6 +3965,205 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 </div>
               )}
 
+              {/* Modal Executivo: Apresentação para os Sócios & Parecer da Diretoria */}
+              {isExecutiveReportOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-4 md:p-6 overflow-hidden">
+                  <div className="bg-[#161922] border border-[#E2B042]/40 rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl relative overflow-hidden my-auto">
+                    
+                    {/* Modal Header (Sticky) */}
+                    <div className="flex justify-between items-start border-b border-gray-800 p-4 sm:p-6 shrink-0 bg-[#161922]">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-0.5 bg-[#E2B042]/20 text-[#E2B042] border border-[#E2B042]/40 rounded text-[10px] font-extrabold uppercase tracking-wider">
+                            Relatório Executivo
+                          </span>
+                          <span className="text-xs text-gray-400 font-mono">Mês de Referência: {filtroMes}</span>
+                        </div>
+                        <h2 className="text-lg sm:text-xl font-bold text-white uppercase tracking-wider font-[family-name:var(--font-josefin-sans)] mt-1">
+                          Demonstrativo Financeiro para Sócios & Diretoria
+                        </h2>
+                        <p className="text-xs text-gray-400">Portal Egrégora • Cosmo Alma TV</p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof window !== "undefined") {
+                              localStorage.setItem("egregora_relatorio_comentarios", relatorioComentarios);
+                              window.print();
+                            }
+                          }}
+                          className="hidden sm:flex px-3.5 py-2 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-extrabold text-xs rounded-lg uppercase tracking-wider transition-all cursor-pointer items-center gap-1.5 shadow-[0_0_15px_rgba(226,176,66,0.3)]"
+                        >
+                          🖨️ Imprimir / PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsExecutiveReportOpen(false)}
+                          className="p-2 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors cursor-pointer text-lg"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scrollable Body */}
+                    <div className="p-4 sm:p-6 overflow-y-auto space-y-6 grow scrollbar-thin">
+                      
+                      {/* Executive KPIs Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                        <div className="bg-[#111622] p-3.5 sm:p-4 rounded-xl border border-gray-800">
+                          <span className="text-[10px] uppercase text-gray-400 block mb-1">Receita Bruta Total</span>
+                          <span className="text-base sm:text-lg font-bold font-mono text-green-400">
+                            R$ {totalEntradas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="bg-[#111622] p-3.5 sm:p-4 rounded-xl border border-gray-800">
+                          <span className="text-[10px] uppercase text-gray-400 block mb-1">Custos Operacionais</span>
+                          <span className="text-base sm:text-lg font-bold font-mono text-red-400">
+                            R$ {totalSaidas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="bg-[#111622] p-3.5 sm:p-4 rounded-xl border border-[#E2B042]/30">
+                          <span className="text-[10px] uppercase text-gray-400 block mb-1">Resultado Líquido</span>
+                          <span className={`text-base sm:text-lg font-bold font-mono ${saldoLiquido >= 0 ? 'text-[#E2B042]' : 'text-red-400'}`}>
+                            R$ {saldoLiquido.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+
+                        <div className="bg-[#111622] p-3.5 sm:p-4 rounded-xl border border-blue-900/40">
+                          <span className="text-[10px] uppercase text-blue-300 block mb-1">Saldo em Caixa Asaas</span>
+                          <span className="text-base sm:text-lg font-bold font-mono text-blue-400">
+                            R$ {(asaasBalance?.saldoAsaasReal ?? saldoLiquido).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Breakdown & Summary Cards */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        
+                        {/* Despesas por Categoria */}
+                        <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 space-y-3">
+                          <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center justify-between">
+                            <span>Distribuição de Custos</span>
+                            <span className="text-gray-500 font-mono text-[10px]">{despesasPorCategoria.length} centros de custo</span>
+                          </h4>
+                          <div className="space-y-2.5 max-h-52 overflow-y-auto pr-1">
+                            {despesasPorCategoria.length === 0 ? (
+                              <p className="text-xs text-gray-500 italic py-4 text-center">Nenhuma despesa no período.</p>
+                            ) : (
+                              despesasPorCategoria.map(item => (
+                                <div key={item.nome} className="space-y-1">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-gray-300 font-medium">{item.nome}</span>
+                                    <span className="font-mono text-white font-semibold">
+                                      R$ {item.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ({item.percentual.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                  <div className="w-full bg-gray-900 rounded-full h-1.5 overflow-hidden">
+                                    <div className="h-full rounded-full" style={{ width: `${item.percentual}%`, backgroundColor: item.cor }}></div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Parecer / Comentários da Diretoria */}
+                        <div className="bg-[#111622] p-4 rounded-xl border border-[#E2B042]/30 space-y-2 flex flex-col">
+                          <div className="flex justify-between items-center">
+                            <label className="text-xs font-bold text-[#E2B042] uppercase tracking-wider flex items-center gap-1.5">
+                              <span>✍️</span> Parecer da Diretoria / Notas aos Sócios
+                            </label>
+                            <span className="text-[10px] text-gray-500">Editável antes do PDF</span>
+                          </div>
+                          <p className="text-[10px] text-gray-400">
+                            Insira notas explicativas sobre os resultados do mês, investimentos ou metas futuras:
+                          </p>
+                          <textarea
+                            rows={5}
+                            value={relatorioComentarios}
+                            onChange={(e) => {
+                              setRelatorioComentarios(e.target.value);
+                              if (typeof window !== "undefined") {
+                                localStorage.setItem("egregora_relatorio_comentarios", e.target.value);
+                              }
+                            }}
+                            placeholder="Ex: Neste mês de referência, alocamos maior parte dos recursos em campanhas de tráfego para expansão da audiência dos canais parceiros. O saldo em caixa permanece saudável e em conformidade com as diretrizes aprovadas..."
+                            className="w-full grow bg-[#0B0E17] border border-gray-800 rounded-lg p-3 text-xs text-white focus:border-[#E2B042] focus:outline-none transition-colors leading-relaxed font-sans resize-none min-h-[110px]"
+                          />
+                        </div>
+
+                      </div>
+
+                      {/* Resumo de Cotas & Transações Recentes do Mês */}
+                      <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 space-y-3">
+                        <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider">
+                          Extrato Consolidado das Transações ({transacoesPagas.length} movimentações liquidadas)
+                        </h4>
+                        <div className="max-h-56 overflow-y-auto pr-1">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-gray-800 text-gray-400 font-semibold text-[10px]">
+                                <th className="pb-1.5">Data</th>
+                                <th className="pb-1.5">Descrição</th>
+                                <th className="pb-1.5">Categoria</th>
+                                <th className="pb-1.5 text-right">Valor (R$)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-800/40 text-[11px]">
+                              {transacoesPagas.map(t => (
+                                <tr key={t.id}>
+                                  <td className="py-2 text-gray-400 font-mono">{new Date(t.data_transacao).toLocaleDateString("pt-BR", { timeZone: "UTC" })}</td>
+                                  <td className="py-2 text-white max-w-[280px] truncate">{t.descricao}</td>
+                                  <td className="py-2 text-gray-300">{t.categoria}</td>
+                                  <td className={`py-2 text-right font-mono font-bold ${t.tipo === "ENTRADA" ? "text-green-400" : "text-red-400"}`}>
+                                    {t.tipo === "ENTRADA" ? "+ " : "- "}R$ {t.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Modal Footer (Sticky) */}
+                    <div className="border-t border-gray-800 p-4 sm:p-5 shrink-0 bg-[#161922] flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-gray-400">
+                      <div>
+                        <span>Documento gerado automaticamente pelo Portal Egrégora em {new Date().toLocaleDateString('pt-BR')}.</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsExecutiveReportOpen(false)}
+                          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold text-xs rounded-lg transition-colors cursor-pointer"
+                        >
+                          Fechar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof window !== "undefined") {
+                              localStorage.setItem("egregora_relatorio_comentarios", relatorioComentarios);
+                              window.print();
+                            }
+                          }}
+                          className="px-5 py-2 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-extrabold text-xs rounded-lg uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_15px_rgba(226,176,66,0.3)] flex items-center gap-1.5"
+                        >
+                          🖨️ Gerar PDF Executivo
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
             </div>
           );
         })()}
@@ -3518,36 +4205,39 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                 <div className="flex flex-col lg:flex-row gap-8">
                   
                   {/* SEÇÕES - BARRA LATERAL (DESKTOP) E SUPERIOR (MOBILE) */}
-                  <div className="w-full lg:w-64 flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 border-b lg:border-b-0 lg:border-r border-gray-800 lg:pr-6 shrink-0 scrollbar-none">
+                  <div className="w-full lg:w-72 flex flex-row lg:flex-col gap-2.5 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 border-b lg:border-b-0 lg:border-r border-gray-800 lg:pr-6 shrink-0 scrollbar-none">
                     <button
                       onClick={() => setCreatorSubTab("gerais")}
-                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
+                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-3 ${
                         creatorSubTab === "gerais"
-                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
-                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
+                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.2)]"
+                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60 hover:border-gray-700"
                       }`}
                     >
-                      <span className="text-base">📊</span> Dados Gerais
+                      <span className="text-xl shrink-0">📊</span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="leading-snug font-bold">Visão Geral</span>
+                        <span className={`text-[10px] font-medium tracking-normal ${creatorSubTab === "gerais" ? "text-black/75" : "text-gray-500"}`}>
+                          Repasses & Adimplência
+                        </span>
+                      </div>
                     </button>
+
                     <button
                       onClick={() => setCreatorSubTab("cosmica")}
-                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
+                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-3 ${
                         creatorSubTab === "cosmica"
-                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
-                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
+                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.2)]"
+                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60 hover:border-gray-700"
                       }`}
                     >
-                      <span className="text-base">🌌</span> Evolução Cósmica
-                    </button>
-                    <button
-                      onClick={() => setCreatorSubTab("onboarding")}
-                      className={`flex-1 lg:flex-initial text-left px-4 py-3 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap flex items-center gap-3 ${
-                        creatorSubTab === "onboarding"
-                          ? "bg-[#E2B042] text-black shadow-[0_4px_12px_rgba(226,176,66,0.15)]"
-                          : "bg-[#1A1D29] text-gray-400 hover:text-white border border-gray-800/60"
-                      }`}
-                    >
-                      <span className="text-base">🚀</span> Onboarding & Aulas
+                      <span className="text-xl shrink-0">🌌</span>
+                      <div className="flex flex-col min-w-0">
+                        <span className="leading-snug font-bold">Evolução Cósmica</span>
+                        <span className={`text-[10px] font-medium tracking-normal ${creatorSubTab === "cosmica" ? "text-black/75" : "text-gray-500"}`}>
+                          Roteiro & Shorts
+                        </span>
+                      </div>
                     </button>
                   </div>
 
@@ -3557,6 +4247,36 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                     {creatorSubTab === "gerais" && (
                       <div className="space-y-6">
                         
+                        {/* Banner / Card de Acesso & Lembrete da Academia Cosmo */}
+                        <div className="bg-gradient-to-r from-[#1A1D29] via-[#1c2236] to-[#161d30] border border-[#E2B042]/30 p-5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-12 h-12 rounded-xl bg-[#E2B042]/10 border border-[#E2B042]/30 flex items-center justify-center text-2xl shrink-0">
+                              🎓
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-[#E2B042] bg-[#E2B042]/10 px-2 py-0.5 rounded border border-[#E2B042]/20">
+                                  Treinamentos Oficiais
+                                </span>
+                                <span className="text-[11px] text-gray-400 font-mono">4 Módulos Práticos</span>
+                              </div>
+                              <h4 className="text-sm font-bold text-white mt-0.5">
+                                Academia Cosmo Alma TV
+                              </h4>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                Masterclasses de roteiro magnético, retenção de 15 segundos, templates no Canva, vinhetas 4K e normas da egrégora.
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => router.push('/treinamentos')}
+                            className="px-4 py-2.5 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-extrabold text-xs rounded-lg uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 shrink-0 shadow-[0_0_15px_rgba(226,176,66,0.25)]"
+                          >
+                            <span>🚀 Acessar Academia</span>
+                            <span>→</span>
+                          </button>
+                        </div>
+
                         {/* Status banner e Adimplência */}
                         <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl mystic-glow relative overflow-hidden">
                           <div className="flex justify-between items-start">
@@ -3777,46 +4497,137 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                         {performanceData ? (
                           <div className="space-y-6">
                             
-                            {/* Metas de Monetização */}
-                            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                                Metas de Monetização (YouTube 2026)
-                              </h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Inscritos */}
-                                <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-gray-400">Inscritos</span>
-                                    <span className="font-mono text-white font-bold">{performanceData.inscritos.atual} / {performanceData.inscritos.meta}</span>
-                                  </div>
-                                  <div className="bg-[#1A1D29] h-2.5 rounded-full overflow-hidden border border-gray-800">
-                                    <div
-                                      className="bg-gradient-to-r from-purple-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
-                                      style={{ width: `${Math.min((performanceData.inscritos.atual / performanceData.inscritos.meta) * 100, 100)}%` }}
-                                    ></div>
-                                  </div>
+                            {/* Performance da Playlist Individual */}
+                            <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-5">
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                                <div>
+                                  <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)] flex items-center gap-2">
+                                    <span>🎬</span> Performance da sua Playlist no Canal
+                                  </h4>
+                                  <p className="text-xs text-gray-400 mt-0.5">
+                                    Métricas consolidadas de todos os episódios do seu programa na Cosmo Alma TV
+                                  </p>
                                 </div>
-                                {/* Horas */}
-                                <div className="bg-[#111622] p-4 rounded-lg border border-gray-800">
-                                  <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-gray-400">Horas de Exibição</span>
-                                    <span className="font-mono text-white font-bold">{performanceData.horas.atual}h / {performanceData.horas.meta}h</span>
+                                {performanceData.playlist?.id && (
+                                  <a
+                                    href={`https://www.youtube.com/playlist?list=${performanceData.playlist.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] font-mono px-3 py-1 bg-[#111622] hover:bg-[#1f2433] text-[#E2B042] border border-[#E2B042]/30 rounded-lg flex items-center gap-1.5 transition"
+                                  >
+                                    <span>▶ Abrir no YouTube</span>
+                                    <span className="text-[9px] text-gray-400">({performanceData.playlist.id})</span>
+                                  </a>
+                                )}
+                              </div>
+
+                              {/* 4 Cards de Métricas */}
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                {/* Total Views */}
+                                <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 hover:border-gray-700 transition">
+                                  <div className="text-[11px] text-gray-400 uppercase font-semibold flex items-center gap-1.5 mb-1">
+                                    <span>👁️</span> Total de Views
                                   </div>
-                                  <div className="bg-[#1A1D29] h-2.5 rounded-full overflow-hidden border border-gray-800">
-                                    <div
-                                      className="bg-gradient-to-r from-purple-500 to-[#E2B042] h-full rounded-full transition-all duration-500"
-                                      style={{ width: `${Math.min((performanceData.horas.atual / performanceData.horas.meta) * 100, 100)}%` }}
-                                    ></div>
+                                  <div className="text-xl font-bold text-white font-mono">
+                                    {(performanceData.playlist?.totalViews || 0).toLocaleString('pt-BR')}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 mt-1">Acumulado da playlist</div>
+                                </div>
+
+                                {/* Vídeos no Ar */}
+                                <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 hover:border-gray-700 transition">
+                                  <div className="text-[11px] text-gray-400 uppercase font-semibold flex items-center gap-1.5 mb-1">
+                                    <span>📹</span> Vídeos no Ar
+                                  </div>
+                                  <div className="text-xl font-bold text-[#E2B042] font-mono">
+                                    {performanceData.playlist?.totalVideos || 0}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 mt-1">Episódios publicados</div>
+                                </div>
+
+                                {/* Média por Vídeo */}
+                                <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 hover:border-gray-700 transition">
+                                  <div className="text-[11px] text-gray-400 uppercase font-semibold flex items-center gap-1.5 mb-1">
+                                    <span>📈</span> Média por Vídeo
+                                  </div>
+                                  <div className="text-xl font-bold text-green-400 font-mono">
+                                    {(performanceData.playlist?.mediaViews || 0).toLocaleString('pt-BR')}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 mt-1">Views por episódio</div>
+                                </div>
+
+                                {/* Curtidas & Engajamento */}
+                                <div className="bg-[#111622] p-4 rounded-xl border border-gray-800 hover:border-gray-700 transition">
+                                  <div className="text-[11px] text-gray-400 uppercase font-semibold flex items-center gap-1.5 mb-1">
+                                    <span>💖</span> Engajamento
+                                  </div>
+                                  <div className="text-xl font-bold text-purple-400 font-mono">
+                                    {(performanceData.playlist?.totalLikes || 0).toLocaleString('pt-BR')}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 mt-1">
+                                    {performanceData.playlist?.totalComments || 0} comentários
                                   </div>
                                 </div>
                               </div>
+
+                              {/* Vídeo em Destaque da Playlist (se houver) */}
+                              {performanceData.playlist?.topVideo && (
+                                <div className="bg-gradient-to-r from-[#111622] to-[#161a2b] p-4 rounded-xl border border-gray-800/80 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                                  <div className="relative w-full sm:w-36 aspect-video rounded-lg overflow-hidden bg-gray-900 border border-gray-800 flex-shrink-0">
+                                    <img
+                                      src={performanceData.playlist.topVideo.thumbnailUrl}
+                                      alt={performanceData.playlist.topVideo.title}
+                                      className="w-full h-full object-cover"
+                                    />
+                                    <div className="absolute top-1 left-1 bg-black/70 text-[#E2B042] text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                      ⭐ TOP 1
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[#E2B042] mb-0.5">
+                                      Episódio Mais Assistido da sua Playlist
+                                    </div>
+                                    <h5 className="text-xs sm:text-sm font-semibold text-white truncate mb-1.5">
+                                      {performanceData.playlist.topVideo.title}
+                                    </h5>
+                                    <div className="flex items-center gap-4 text-[11px] text-gray-400">
+                                      <span className="text-white font-mono font-bold">
+                                        👁️ {(performanceData.playlist.topVideo.viewCount || 0).toLocaleString('pt-BR')} visualizações
+                                      </span>
+                                      <span className="text-gray-400">
+                                        👍 {performanceData.playlist.topVideo.likeCount || 0} curtidas
+                                      </span>
+                                      {performanceData.playlist.topVideo.id && (
+                                        <a
+                                          href={`https://www.youtube.com/watch?v=${performanceData.playlist.topVideo.id}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-[#E2B042] hover:underline ml-auto"
+                                        >
+                                          Assistir ↗
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
-                            {/* Insights de Conteúdo */}
+                            {/* Insights de Roteiro & Conteúdo para Criadores */}
                             <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-6">
-                              <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                                Evolução Cósmica (Insights do Algoritmo)
-                              </h4>
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-800 pb-4">
+                                <div>
+                                  <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)] flex items-center gap-2">
+                                    <span>🎯</span> Evolução Cósmica: Diretrizes de Roteiro & Produção
+                                  </h4>
+                                  <p className="text-xs text-gray-400 mt-0.5">
+                                    Feedbacks orientados exclusivamente ao conteúdo que você roteiriza e grava para maximizar a retenção e alcance.
+                                  </p>
+                                </div>
+                                <span className="px-2.5 py-1 bg-[#111622] text-[#E2B042] border border-[#E2B042]/30 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                                  2 Pilares do Criador
+                                </span>
+                              </div>
 
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {Object.keys(performanceData.pilares).length === 0 ? (
@@ -3824,37 +4635,88 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                                     Não há vídeos disponíveis para feedback.
                                   </div>
                                 ) : (
-                                  Object.entries(performanceData.pilares).map(([key, pilar]: [string, any]) => (
-                                    <div key={key} className="bg-[#111622] p-4 rounded-lg border border-gray-800 space-y-3 relative overflow-hidden flex flex-col justify-between">
-                                      <div>
-                                        <div className="flex justify-between items-center mb-2">
-                                          <h5 className="text-xs uppercase text-white font-bold tracking-wider">{pilar.titulo}</h5>
-                                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
-                                            pilar.status === "OK" ? "bg-green-950/40 text-green-400 border border-green-800/40" : "bg-red-950/40 text-red-400 border border-red-800/40"
-                                          }`}>
-                                            {pilar.status}
-                                          </span>
-                                        </div>
-                                        <p className="text-[11px] text-gray-400 leading-relaxed mb-3">{pilar.problema}</p>
-                                      </div>
-                                      <div className="border-t border-gray-800/50 pt-2 space-y-1">
-                                        <div className="text-[9px] text-[#E2B042] font-semibold uppercase tracking-wide">💡 Recomendação:</div>
-                                        <p className="text-[11px] text-gray-300 leading-relaxed font-medium mb-2">{pilar.solucao}</p>
-                                        <ul className="list-disc pl-4 text-[10px] text-gray-400 space-y-1">
-                                          {pilar.acoes.map((acao: string, i: number) => (
-                                            <li key={i}>{acao}</li>
-                                          ))}
-                                        </ul>
-                                        {pilar.exemplo && (
-                                          <div className="bg-[#1A1D29]/50 p-2 rounded text-[10px] text-gray-500 italic mt-2">
-                                            <strong>Exemplo:</strong> {pilar.exemplo}
+                                  Object.entries(performanceData.pilares)
+                                    .filter(([key]) => key === "retencao" || key === "shorts")
+                                    .map(([key, pilar]: [string, any]) => {
+                                      const isRetencao = key === "retencao";
+                                      return (
+                                        <div key={key} className="bg-[#111622] p-5 rounded-xl border border-gray-800 hover:border-gray-700 transition space-y-4 flex flex-col justify-between">
+                                          <div className="space-y-3">
+                                            <div className="flex justify-between items-start gap-2">
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-xl">{isRetencao ? "⏱️" : "📱"}</span>
+                                                <h5 className="text-xs uppercase text-white font-bold tracking-wider">{pilar.titulo}</h5>
+                                              </div>
+                                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold shrink-0 ${
+                                                pilar.status === "OK" ? "bg-green-950/40 text-green-400 border border-green-800/40" : "bg-amber-950/40 text-amber-400 border border-amber-800/40"
+                                              }`}>
+                                                {pilar.status === "OK" ? "✓ Excelente" : "⚠️ Atenção / Melhorar"}
+                                              </span>
+                                            </div>
+                                            
+                                            <div className="space-y-1">
+                                              <span className="text-[10px] uppercase font-bold text-gray-500 block">Diagnóstico do Roteiro:</span>
+                                              <p className="text-xs text-gray-300 leading-relaxed">{pilar.problema}</p>
+                                            </div>
                                           </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  ))
+
+                                          <div className="border-t border-gray-800/80 pt-3 space-y-3">
+                                            <div>
+                                              <div className="text-[10px] text-[#E2B042] font-bold uppercase tracking-wide mb-1 flex items-center gap-1">
+                                                <span>💡</span> Diretriz de Gravação:
+                                              </div>
+                                              <p className="text-xs text-white font-medium leading-relaxed">{pilar.solucao}</p>
+                                            </div>
+
+                                            {pilar.acoes && pilar.acoes.length > 0 && (
+                                              <div>
+                                                <span className="text-[10px] text-gray-400 font-bold uppercase block mb-1">Checklist de Ações Práticas:</span>
+                                                <ul className="space-y-1.5 pl-1">
+                                                  {pilar.acoes.map((acao: string, i: number) => (
+                                                    <li key={i} className="text-[11px] text-gray-300 flex items-start gap-2 leading-relaxed">
+                                                      <span className="text-[#E2B042] font-bold shrink-0">▸</span>
+                                                      <span>{acao}</span>
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                              </div>
+                                            )}
+
+                                            {pilar.exemplo && (
+                                              <div className="bg-[#1A1D29]/70 border border-[#E2B042]/20 p-3 rounded-lg text-xs text-gray-300 space-y-1">
+                                                <span className="text-[10px] font-bold text-[#E2B042] uppercase block">🎯 Exemplo Prático Aplicado:</span>
+                                                <p className="italic text-gray-300 text-[11px] leading-relaxed">"{pilar.exemplo}"</p>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })
                                 )}
                               </div>
+
+                              {/* Banner Contextual de Treinamento na Academia */}
+                              <div className="bg-gradient-to-r from-purple-950/30 via-[#1A1D29] to-[#111622] border border-purple-500/30 p-5 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base">🎓</span>
+                                    <h5 className="text-xs font-bold uppercase tracking-wider text-purple-300">
+                                      Quer dominar na prática o Framework 3A e Técnicas de Roteiro?
+                                    </h5>
+                                  </div>
+                                  <p className="text-xs text-gray-400 leading-relaxed">
+                                    Assista às aulas práticas e baixe os materiais de apoio na <strong>Academia Cosmo Alma TV</strong>.
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => router.push('/treinamentos')}
+                                  className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-[0_0_15px_rgba(168,85,247,0.3)] flex items-center gap-2"
+                                >
+                                  <span>🎬 Assistir Aulas na Academia</span>
+                                  <span>→</span>
+                                </button>
+                              </div>
+
                             </div>
 
                           </div>
@@ -3863,69 +4725,6 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
                             {loadingPerformance ? "Buscando relatórios cósmicos..." : "Nenhum insight disponível para esta playlist."}
                           </div>
                         )}
-                      </div>
-                    )}
-
-                    {creatorSubTab === "onboarding" && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        
-                        {/* Onboarding Instructions */}
-                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4 flex flex-col justify-between">
-                          <div className="space-y-4">
-                            <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                              🚀 Onboarding e Treinamento
-                            </h4>
-                            <div className="space-y-2">
-                              <h5 className="text-xs uppercase text-gray-400 font-semibold">Diretrizes e Rotina de Produção</h5>
-                              <div className="bg-[#111622] rounded-lg p-4 border border-gray-800 text-xs text-gray-300 space-y-2 max-h-[220px] overflow-y-auto leading-relaxed">
-                                {portalConfigs.production_guidelines.split("\n").map((line, idx) => (
-                                  <p key={idx}>{line}</p>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="bg-purple-950/20 border border-purple-500/20 rounded-lg p-4 text-xs text-purple-300 mt-4">
-                            <h6 className="font-semibold mb-1">🛎️ Suporte Cosmo Alma TV:</h6>
-                            <p className="text-[11px] text-gray-400 whitespace-pre-wrap">{portalConfigs.support_contact}</p>
-                          </div>
-                        </div>
-
-                        {/* Onboarding Videos & Classes */}
-                        <div className="bg-[#1A1D29] border border-gray-800 p-6 rounded-xl space-y-4">
-                          <h4 className="text-sm font-semibold uppercase tracking-wider text-[#E2B042] font-[family-name:var(--font-josefin-sans)]">
-                            📹 Vídeo de Instrução e Aulas
-                          </h4>
-                          {getYouTubeEmbedUrl(portalConfigs.onboarding_video_url) ? (
-                            <div className="relative pb-[56.25%] h-0 rounded-lg overflow-hidden border border-gray-800 bg-black">
-                              <iframe
-                                className="absolute top-0 left-0 w-full h-full"
-                                src={getYouTubeEmbedUrl(portalConfigs.onboarding_video_url) || ""}
-                                title="Vídeo de Integração Cosmo Alma TV"
-                                frameBorder="0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                allowFullScreen
-                              ></iframe>
-                            </div>
-                          ) : (
-                            <div className="bg-[#111622] rounded-lg p-6 border border-gray-800 flex flex-col items-center justify-center text-center h-[180px]">
-                              <span className="text-2xl mb-2">📹</span>
-                              <p className="text-[11px] text-gray-500">Nenhum vídeo explicativo cadastrado no momento.</p>
-                            </div>
-                          )}
-                          
-                          <div className="pt-2">
-                            <a
-                              href={portalConfigs.whatsapp_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 bg-[#E2B042] hover:bg-[#D69E2E] text-black font-bold rounded-lg text-xs tracking-wider uppercase transition-all shadow-[0_0_10px_rgba(226,176,66,0.15)] cursor-pointer"
-                            >
-                              💬 Acessar Whatsapp da Comunidade
-                            </a>
-                          </div>
-                        </div>
-
                       </div>
                     )}
 
@@ -3939,9 +4738,216 @@ IP: 189.120.45.191 - Timestamp: ${new Date().toLocaleString()}
         )}
 
       </main>
+
+      {/* ========================================================================= */}
+      {/* DEDICATED PRINTABLE EXECUTIVE REPORT FOR PARTNERS & DIRECTORS (A4 PRINT) */}
+      {/* ========================================================================= */}
+      <div className="hidden print:block w-full min-h-screen bg-white text-gray-900 p-8 font-sans">
+        {/* Letterhead Header */}
+        <div className="border-b-2 border-[#E2B042] pb-6 mb-6 flex justify-between items-start">
+          <div className="flex items-center gap-4">
+            <img
+              src="/logo.png"
+              alt="Cosmo Alma TV"
+              className="h-16 w-16 object-contain"
+            />
+            <div>
+              <h1 className="text-2xl font-black text-gray-900 tracking-wider font-[family-name:var(--font-josefin-sans)] uppercase">
+                COSMO ALMA TV
+              </h1>
+              <p className="text-xs font-bold uppercase tracking-widest text-[#B7791F]">
+                Egrégora de Criadores de Conteúdo • Portal CMS
+              </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                CNPJ: 12.345.678/0001-99 • financeiro@cosmoalmatv.com.br
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="inline-block bg-gray-100 text-gray-800 text-xs font-bold uppercase px-3 py-1 rounded border border-gray-300">
+              Relatório Executivo Mensal
+            </span>
+            <div className="text-xs text-gray-600 mt-2 font-mono">
+              <p><strong>Mês de Referência:</strong> {filtroMes}</p>
+              <p><strong>Data de Emissão:</strong> {new Date().toLocaleDateString('pt-BR')}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Resumo Executivo - Cards Principais */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+            <span className="text-[10px] uppercase font-bold text-gray-500 block mb-1">Receita Bruta Total</span>
+            <span className="text-xl font-bold font-mono text-green-700">
+              R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA").reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+            <span className="text-[10px] uppercase font-bold text-gray-500 block mb-1">Custos & Despesas</span>
+            <span className="text-xl font-bold font-mono text-red-700">
+              R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "SAIDA").reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-300 p-4 rounded-lg">
+            <span className="text-[10px] uppercase font-bold text-amber-900 block mb-1">Resultado Líquido</span>
+            <span className="text-xl font-bold font-mono text-amber-800">
+              R$ {(
+                transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA").reduce((a, b) => a + b.valor, 0) -
+                transacoes.filter(t => t.status === "PAGO" && t.tipo === "SAIDA").reduce((a, b) => a + b.valor, 0)
+              ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+            <span className="text-[10px] uppercase font-bold text-blue-900 block mb-1">Saldo em Caixa (Asaas)</span>
+            <span className="text-xl font-bold font-mono text-blue-800">
+              R$ {(asaasBalance?.saldoAsaasReal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        </div>
+
+        {/* Parecer / Comentários da Diretoria aos Sócios */}
+        {relatorioComentarios && (
+          <div className="bg-amber-50/60 border-l-4 border-[#E2B042] p-4 rounded-r-lg mb-6">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900 mb-1.5 flex items-center gap-1.5">
+              <span>✍️</span> Parecer da Diretoria & Notas Explicativas aos Sócios
+            </h3>
+            <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap">
+              {relatorioComentarios}
+            </p>
+          </div>
+        )}
+
+        {/* Demonstrativo Sintético de Resultados (DRE) & Centros de Custo */}
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          {/* DRE Simplificado */}
+          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900 mb-3 border-b pb-2">
+              Demonstrativo de Resultado do Exercício (DRE)
+            </h3>
+            <table className="w-full text-xs">
+              <tbody className="divide-y divide-gray-200">
+                <tr>
+                  <td className="py-1.5 text-gray-700">(+) Cotas Condominiais Recebidas</td>
+                  <td className="py-1.5 text-right font-mono font-semibold text-green-700">
+                    R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA" && (t.categoria === "Cota Condominial" || (t.descricao && t.descricao.toLowerCase().includes("cota")))).reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 text-gray-700">(+) Retenção Operacional Adsense (30%)</td>
+                  <td className="py-1.5 text-right font-mono font-semibold text-green-700">
+                    R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA" && t.categoria === "Retenção 30% Adsense").reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr className="font-bold bg-gray-100">
+                  <td className="py-1.5 px-2 text-gray-900">(=) Receita Operacional Bruta</td>
+                  <td className="py-1.5 px-2 text-right font-mono text-green-800">
+                    R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA").reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 text-gray-700">(-) Custos Operacionais & Despesas</td>
+                  <td className="py-1.5 text-right font-mono font-semibold text-red-700">
+                    - R$ {transacoes.filter(t => t.status === "PAGO" && t.tipo === "SAIDA").reduce((a, b) => a + b.valor, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr className="font-bold bg-amber-100">
+                  <td className="py-2 px-2 text-amber-900">(=) Saldo / Resultado Líquido</td>
+                  <td className="py-2 px-2 text-right font-mono text-amber-900">
+                    R$ {(
+                      transacoes.filter(t => t.status === "PAGO" && t.tipo === "ENTRADA").reduce((a, b) => a + b.valor, 0) -
+                      transacoes.filter(t => t.status === "PAGO" && t.tipo === "SAIDA").reduce((a, b) => a + b.valor, 0)
+                    ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Despesas por Categoria */}
+          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900 mb-3 border-b pb-2">
+              Detalhamento de Custos por Categoria
+            </h3>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 font-semibold border-b text-[10px]">
+                  <th className="pb-1 text-left">Centro de Custo</th>
+                  <th className="pb-1 text-right">Valor (R$)</th>
+                  <th className="pb-1 text-right">%</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {(() => {
+                  const saídas = transacoes.filter(t => t.status === "PAGO" && t.tipo === "SAIDA");
+                  const totalS = saídas.reduce((a, b) => a + b.valor, 0);
+                  const catMap: { [c: string]: number } = {};
+                  saídas.forEach(t => catMap[t.categoria] = (catMap[t.categoria] || 0) + t.valor);
+                  return Object.keys(catMap).map(c => (
+                    <tr key={c}>
+                      <td className="py-1 text-gray-800">{c}</td>
+                      <td className="py-1 text-right font-mono text-gray-900">R$ {catMap[c].toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                      <td className="py-1 text-right font-mono text-gray-600">{totalS > 0 ? ((catMap[c] / totalS) * 100).toFixed(1) : 0}%</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Extrato Detalhado das Transações Pagas */}
+        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 mb-8">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900 mb-3 border-b pb-2">
+            Extrato Analítico de Lançamentos ({filtroMes})
+          </h3>
+          <table className="w-full text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-gray-300 text-gray-600 font-semibold text-[10px]">
+                <th className="pb-1.5 text-left">Data</th>
+                <th className="pb-1.5 text-left">Descrição do Lançamento</th>
+                <th className="pb-1.5 text-left">Categoria</th>
+                <th className="pb-1.5 text-left">Origem</th>
+                <th className="pb-1.5 text-right">Valor Líquido</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 text-[11px]">
+              {transacoes.filter(t => t.status === "PAGO").map(t => (
+                <tr key={t.id}>
+                  <td className="py-1.5 font-mono text-gray-600">{new Date(t.data_transacao).toLocaleDateString('pt-BR', { timeZone: 'UTC' })}</td>
+                  <td className="py-1.5 text-gray-900 font-medium">{t.descricao}</td>
+                  <td className="py-1.5 text-gray-600">{t.categoria}</td>
+                  <td className="py-1.5 text-gray-600 font-mono text-[10px]">{t.origem || "MANUAL"}</td>
+                  <td className={`py-1.5 text-right font-mono font-bold ${t.tipo === "ENTRADA" ? "text-green-700" : "text-red-700"}`}>
+                    {t.tipo === "ENTRADA" ? "+ " : "- "}R$ {t.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Assinaturas dos Sócios / Conselho */}
+        <div className="grid grid-cols-2 gap-12 pt-12 border-t-2 border-gray-300 text-center text-xs text-gray-800">
+          <div>
+            <div className="border-t border-gray-400 pt-2 font-bold uppercase">
+              Diretoria Executiva / Financeira
+            </div>
+            <p className="text-[10px] text-gray-500">Portal Egrégora • Cosmo Alma TV</p>
+          </div>
+          <div>
+            <div className="border-t border-gray-400 pt-2 font-bold uppercase">
+              Conselho Fiscal / Representante dos Sócios
+            </div>
+            <p className="text-[10px] text-gray-500">Aprovação de Prestação de Contas</p>
+          </div>
+        </div>
+      </div>
       
       {/* Footer */}
-      <footer className="border-t border-[#E2B042]/10 py-6 text-center text-[10px] text-gray-500 bg-[#1A1D29]/50 mt-auto">
+      <footer className="border-t border-[#E2B042]/10 py-6 text-center text-[10px] text-gray-500 bg-[#1A1D29]/50 mt-auto print:hidden">
         <p>© 2026 Cosmo Alma TV. Todos os direitos reservados à Egrégora de Criadores.</p>
         <p className="mt-1 text-gray-600">Desenvolvido em conformidade com o Contrato V3 e regulamentos do Asaas/YouTube.</p>
       </footer>

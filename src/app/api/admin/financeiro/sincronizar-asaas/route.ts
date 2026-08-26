@@ -13,7 +13,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ detail: "Acesso proibido. Apenas administradores podem sincronizar extrato Asaas." }, { status: 403 });
     }
 
-    const result = await syncAsaasTransactionsHistory();
+    let mesFiltro: string | undefined;
+    try {
+      const body = await request.json();
+      if (body && body.mes) {
+        mesFiltro = body.mes;
+      }
+    } catch (e) {}
+
+    const result = await syncAsaasTransactionsHistory(mesFiltro);
     return NextResponse.json(result);
   } catch (err: any) {
     console.error("Erro na rota sincronizar-asaas:", err);

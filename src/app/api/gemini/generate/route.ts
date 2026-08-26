@@ -63,10 +63,25 @@ export async function POST(request: Request) {
   console.log(`[Gemini API] Usando chave fornecida via: ${clientKey ? 'Client Header (localStorage)' : 'Server Env Variable'}. Início da chave: ${geminiKey.substring(0, 7)}...`);
 
   try {
-    const { prompt, systemInstruction, referenceUrls = [], model = 'gemini-3.5-flash' } = await request.json();
+    const { prompt, systemInstruction, referenceUrls = [], model = 'gemini-2.5-flash' } = await request.json();
 
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt é obrigatório.' }, { status: 400 });
+    }
+
+    const validModels = [
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
+    ];
+
+    let targetModel = model || 'gemini-2.5-flash';
+    if (!validModels.includes(targetModel)) {
+      if (targetModel.includes('pro')) targetModel = 'gemini-2.5-pro';
+      else targetModel = 'gemini-2.5-flash';
     }
 
     // Buscar e extrair texto das URLs de referência em paralelo
@@ -83,7 +98,7 @@ export async function POST(request: Request) {
       finalPrompt = `[FONTES DE REFERÊNCIA E REGRAS DE SEO EXTRAS]\n${referenceTexts}\n\n[INSTRUÇÃO DE CRIAÇÃO]\n${prompt}`;
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${geminiKey}`;
 
     // Tentar carregar o "Cérebro SEO/GEO" (conhecimento permanente local)
     let brainText = '';
@@ -99,20 +114,19 @@ export async function POST(request: Request) {
     // Construir instrução de sistema focada em SEO & GEO de 2026
     const baseSystemInstruction = 
       "Você é o copiloto de criação e especialista sênior em SEO (Search Engine Optimization) e GEO (Generative Engine Optimization) de YouTube do canal Cosmo Alma TV (2026).\n" +
-      "Seu objetivo é gerar títulos magnéticos, descrições perfeitas estruturadas por capítulos, tags estratégicas e sugestões precisas de B-Roll / Prompts para IA.\n\n" +
+      "Seu objetivo é gerar títulos magnéticos, descrições perfeitas estruturadas por capítulos, tags estratégicas e sugestões precisas de Texto para Thumbnail (Capas de Alto Impacto).\n\n" +
       (brainText ? `[CÉREBRO DE CONHECIMENTO DE REFERÊNCIA PERMANENTE]\n${brainText}\n\n` : "") +
-      "DIRETRIZES DE SEO & GEO 2026:\n" +
+      "DIRETRIZES DE SEO, GEO & EMBALAGEM 2026:\n" +
       "1. Títulos Magnéticos: Devem misturar curiosidade espiritual/cósmica com termos de alto volume de buscas. Palavras-chave essenciais nos primeiros 50 caracteres. Máximo 70 caracteres.\n" +
-      "2. Ancoragem de Descrição (GEO): Os primeiros 150 caracteres da descrição devem ser um resumo extremamente magnético do assunto, respondendo de forma direta a buscas de usuários para serem exibidos em buscas de IA (GEO).\n" +
-      "3. Localização/GEO: Integrar conceitos universais com conexões e termos que gerem identificação imediata com o público regionalizado.\n" +
-      "4. Tags: Divididas entre cauda corta (termos amplos) e cauda longa (perguntas comuns).\n" +
-      "5. B-Roll e Prompts: Prompts descritivos ultra-visuais, ideais para ferramentas como Midjourney e Runway.\n\n" +
+      "2. Texto para Thumbnail: O texto da capa NUNCA deve repetir o título. Ele deve COMPLEMENTAR a promessa do título com 2 a 4 palavras de alto impacto e provocação.\n" +
+      "3. Ancoragem de Descrição (GEO): Os primeiros 150 caracteres da descrição devem ser um resumo extremamente magnético do assunto, respondendo de forma direta a buscas de usuários para serem exibidos em buscas de IA (GEO).\n" +
+      "4. Tags: Divididas em 5 keywords principais de cauda curta + 5 a 8 de cauda longa (perguntas reais de busca).\n\n" +
       "REGRA DE FORMATO CRÍTICA:\n" +
       "Gere APENAS o conteúdo que foi especificamente solicitado no prompt do usuário (em '[INSTRUÇÃO DE CRIAÇÃO]').\n" +
       "- Se o usuário pediu TÍTULOS, responda APENAS com os títulos.\n" +
       "- Se o usuário pediu DESCRIÇÃO, responda APENAS com a descrição.\n" +
-      "- Se o usuário pediu TAGS, responda APENAS com a lista de tags.\n" +
-      "- Se o usuário pediu B-ROLL, responda APENAS com as sugestões de B-roll.\n" +
+      "- Se o usuário pediu TAGS, responda APENAS com a estrutura solicitada de tags (5 keywords + 5-8 cauda longa + lista separada por vírgulas).\n" +
+      "- Se o usuário pediu THUMBNAIL (ou TEXTO PARA THUMBNAIL), responda APENAS com as opções de texto de capa complementares ao título.\n" +
       "Nunca misture as seções ou gere todas de uma vez, a menos que o prompt peça explicitamente por tudo.\n\n" +
       (systemInstruction ? `Instruções adicionais específicas:\n${systemInstruction}` : "");
 

@@ -22,7 +22,7 @@ interface Outputs {
   titles: string;
   description: string;
   tags: string;
-  broll: string;
+  thumbnail: string;
   [key: string]: string;
 }
 
@@ -53,7 +53,7 @@ export default function OtimizadorPage() {
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   
   // Configurações de Otimização & Geração
-  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash');
   const [stripSpeakers, setStripSpeakers] = useState<boolean>(false);
   const [stripTimecodes, setStripTimecodes] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('titles');
@@ -63,7 +63,7 @@ export default function OtimizadorPage() {
     titles: '',
     description: '',
     tags: '',
-    broll: ''
+    thumbnail: ''
   });
 
   // Métricas de Tokens (Sessão Atual)
@@ -195,7 +195,7 @@ export default function OtimizadorPage() {
     setActiveProject(project);
     setTranscript('');
     setCleanedTranscript('');
-    setOutputs({ titles: '', description: '', tags: '', broll: '' });
+    setOutputs({ titles: '', description: '', tags: '', thumbnail: '' });
     
     setIsLoadingTranscript(true);
     try {
@@ -284,19 +284,27 @@ ${cleanedTranscript}`;
         break;
 
       case 'tags':
-        promptText = `Gere uma lista de tags/palavras-chave separadas por vírgula para o YouTube com base nesta transcrição.
-Inclua palavras-chave de cauda curta (termos amplos) e cauda longa (perguntas ou frases específicas que as pessoas buscam sobre espiritualidade e cosmos). Retorne APENAS a lista separada por vírgulas.
+        promptText = `Baseado na transcrição abaixo, gere uma estratégia completa de tags para o YouTube organizada estritamente em:
+
+1. 🎯 PALAVRAS-CHAVE PRINCIPAIS / CAUDA CURTA (Exatamente 5 keywords de alto volume e ampla busca sobre o tema central).
+2. 🔍 TAGS DE CAUDA LONGA / BUSCA ESPECÍFICA (Entre 5 e 8 frases ou perguntas reais que o público digita na busca do YouTube).
+3. 📋 LISTA CONSOLIDADA PARA COPIAR E COLAR (Todas as tags acima reunidas em uma única linha separadas estritamente por vírgula, pronta para colar no YouTube Studio).
 
 Transcrição:
 ${cleanedTranscript}`;
         break;
 
-      case 'broll':
-        promptText = `Analise a transcrição e identifique de 5 a 8 momentos cruciais onde o editor deve inserir cenas de B-roll, imagens conceituais ou trechos rápidos de vídeo gerados por Inteligência Artificial (ex: Midjourney, Runway) para reter a atenção do público.
-Para cada recomendação, forneça:
-1. O trecho da fala de referência.
-2. A sugestão de elemento visual (B-roll).
-3. O prompt detalhado pronto para uso em geradores de imagem/vídeo IA (ex: "Fotografia realista de um monge meditando sob uma árvore cósmica, partículas de luz flutuando, estilo cinematográfico, 8k").
+      case 'thumbnail':
+        promptText = `Baseado na transcrição abaixo do nosso próximo vídeo, gere 5 a 6 opções altamente atraentes de TEXTO PARA THUMBNAIL (texto para estampar na capa do vídeo).
+
+REGRAS CRÍTICAS DE TEXTO PARA THUMBNAIL (SINERGIA COM O TÍTULO):
+1. O texto da thumbnail NÃO DEVE REPETIR O TÍTULO. Ele deve COMPLEMENTAR a promessa do título criando uma lacuna de curiosidade (Curiosity Gap) e alto impacto visual em telas de celular.
+2. Seja ultra conciso: MÁXIMO DE 2 A 4 PALAVRAS por opção (ex: "ELES ESCONDERAM", "A CHAVE OCULTA", "ISSO MUDA TUDO", "NÃO IGNORE ISSO", "A FREQUÊNCIA REAL").
+3. Use palavras curtas, impactantes, provocativas ou misteriosas que contrastem com o tema abordado.
+4. Para cada opção, forneça:
+   - 🎯 Texto da Thumbnail: [2 a 4 palavras em caixa alta]
+   - 💡 Título Complementar Recomendado: [como o título e a thumb jogam juntos]
+   - 🎨 Sugestão Visual Rápida: [expressão facial, elemento central ou cor de contraste para a capa]
 
 Transcrição:
 ${cleanedTranscript}`;
@@ -465,6 +473,14 @@ ${cleanedTranscript}`;
               <span>🧘</span> ÁREA DO CRIADOR
             </button>
 
+            {/* Treinamentos / Academia Cosmo */}
+            <button
+              onClick={() => router.push('/treinamentos')}
+              className="w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer text-gray-300 hover:bg-[#111622] hover:text-white border border-transparent hover:border-[#E2B042]/20"
+            >
+              <span>🎬</span> ACADEMIA COSMO
+            </button>
+
             {/* Otimizador tab (Active) */}
             <button
               className="w-full text-left px-4 py-2.5 rounded-lg text-xs font-semibold tracking-wider transition-all duration-300 flex items-center gap-2 cursor-pointer bg-[#E2B042] text-black shadow-[0_0_15px_rgba(226,176,66,0.3)]"
@@ -587,8 +603,12 @@ ${cleanedTranscript}`;
             className={styles.formInput} 
             style={{ padding: '6px', fontSize: '0.85rem' }}
           >
-            <option value="gemini-3.5-flash">Gemini 3.5 Flash (Rápido)</option>
-            <option value="gemini-3.1-pro">Gemini 3.1 Pro (Avançado)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash (Recomendado • Rápido & Preciso)</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro (Avançado • Raciocínio & Copy)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash (Nova Geração)</option>
+            <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite (Ultra Leve)</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash (Estável)</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Estável Pro)</option>
           </select>
         </div>
       </div>
@@ -740,10 +760,10 @@ ${cleanedTranscript}`;
                         Tags
                       </button>
                       <button 
-                        className={`${styles.tabBtn} ${activeTab === 'broll' ? styles.active : ''}`}
-                        onClick={() => setActiveTab('broll')}
+                        className={`${styles.tabBtn} ${activeTab === 'thumbnail' ? styles.active : ''}`}
+                        onClick={() => setActiveTab('thumbnail')}
                       >
-                        Sugestões B-Roll (IA)
+                        Texto para Thumbnail
                       </button>
                     </div>
                   </div>
@@ -801,14 +821,14 @@ ${cleanedTranscript}`;
                   onClick={() => generateContent('tags')}
                   disabled={isGenerating || isLoadingTranscript || !cleanedTranscript}
                 >
-                  🏷️ Gerar Tags YouTube
+                  🏷️ Gerar Tags (Keywords + Cauda Longa)
                 </button>
                 <button 
                   className={`${styles.btn} ${styles.btnSuccess}`} 
-                  onClick={() => generateContent('broll')}
+                  onClick={() => generateContent('thumbnail')}
                   disabled={isGenerating || isLoadingTranscript || !cleanedTranscript}
                 >
-                  🎬 Sugerir B-Roll & Prompts IA
+                  🖼️ Sugerir Texto para Thumbnail
                 </button>
               </div>
 

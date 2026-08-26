@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { sendCreatorWelcomeAndTrainingNotification } from "@/lib/services/email";
 
 export async function POST(request: Request) {
   try {
@@ -30,12 +31,41 @@ export async function POST(request: Request) {
     }
 
     if (event === "PAYMENT_RECEIVED" || event === "PAYMENT_CONFIRMED") {
+      const shouldSendWelcome = !condomino.boas_vindas_enviada;
+      const updateData: any = { status: "ATIVO_ADIMPLENTE" };
+      if (shouldSendWelcome) {
+        updateData.boas_vindas_enviada = true;
+        updateData.boas_vindas_enviada_em = new Date().toISOString();
+      }
+
       const { error: updateError } = await supabase
         .from("condominos")
-        .update({ status: "ATIVO_ADIMPLENTE" })
+        .update(updateData)
         .eq("id", condomino.id);
 
       if (updateError) throw new Error(updateError.message);
+
+      // Disparar e-mail de boas-vindas com treinamentos obrigatórios SOMENTE 1 VEZ na adesão
+      if (shouldSendWelcome) {
+        (async () => {
+          try {
+            const { data: mandatoryModules } = await supabase
+              .from("treinamento_modulos")
+              .select("*")
+              .eq("ativo", true)
+              .eq("obrigatorio", true)
+              .order("ordem", { ascending: true });
+
+            await sendCreatorWelcomeAndTrainingNotification({
+              creator: condomino,
+              mandatoryModules: mandatoryModules || []
+            });
+            console.log(`[Asaas Webhook] E-mail de boas-vindas e treinamento enviado para: ${condomino.nome_comercial} (${condomino.email})`);
+          } catch (mailErr) {
+            console.error("[Asaas Webhook] Erro ao enviar e-mail de boas-vindas do treinamento:", mailErr);
+          }
+        })();
+      }
 
       // Record transaction in cashflow
       const paymentId = payment.id || "";
@@ -46,18 +76,25 @@ export async function POST(request: Request) {
       const mes_referencia = `${year}-${month}`;
 
       try {
+        let creatorDisplayName = "";
+        if (condomino.nome_comercial && condomino.nome_completo && condomino.nome_comercial !== condomino.nome_completo) {
+          creatorDisplayName = `${condomino.nome_comercial} (${condomino.nome_completo})`;
+        } else {
+          creatorDisplayName = condomino.nome_comercial || condomino.nome_completo || "Criador";
+        }
+
         const { data: existingTx } = await supabase
           .from("transacoes_financeiras")
           .select("id")
-          .ilike("descricao", `%${paymentId}%`)
-          .maybeSingle();
+          .or(`asaas_id.eq.${paymentId},descricao.ilike.%${paymentId}%`)
+          .limit(1);
 
-        if (!existingTx && paymentId) {
+        if ((!existingTx || existingTx.length === 0) && paymentId) {
           await supabase
             .from("transacoes_financeiras")
             .insert({
               tipo: "ENTRADA",
-              descricao: `Cota Condominial - ${condomino.nome_comercial} (Ref Asaas: ${paymentId})`,
+              descricao: `Cota Condominial - ${creatorDisplayName} (Ref Asaas: ${paymentId})`,
               valor: valorPago,
               categoria: "Cota Condominial",
               status: "PENDENTE_APROVACAO",

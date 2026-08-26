@@ -62,6 +62,10 @@ try {
     fs.copyFileSync(envProductionPath, path.join(TEMP_DIR, ".env"));
   }
 
+  // Criar .npmrc para compatibilidade de dependências no servidor
+  log("Criando .npmrc...");
+  fs.writeFileSync(path.join(TEMP_DIR, ".npmrc"), "legacy-peer-deps=true\n", "utf8");
+
   // 3. Criar os arquivos de inicialização do Passenger (server.js, app.js, index.js)
   log("Criando server.js para gerenciamento do Next.js via Phusion Passenger (Hostinger)...");
   const serverJsContent = `// Otimizacoes para evitar o limite de processos (nproc) no Hostinger / cPanel
@@ -76,11 +80,13 @@ const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 
 function writeToLogFile(prefix, data) {
   const time = new Date().toISOString();
-  let logData = data.toString();
+  let logData = data ? data.toString() : '';
   if (!logData.endsWith('\\n')) {
     logData += '\\n';
   }
-  logStream.write(\`[\${time}] [\${prefix}] \${logData}\`);
+  try {
+    logStream.write(\`[\${time}] [\${prefix}] \${logData}\`);
+  } catch (e) {}
 }
 
 // Redireciona standard output e standard error
@@ -99,10 +105,14 @@ process.stderr.write = function(chunk, encoding, callback) {
 
 // Captura erros não tratados
 process.on('uncaughtException', (err) => {
-  writeToLogFile('CRITICAL', \`Uncaught Exception: \${err.stack || err}\\n\`);
-  logStream.end(() => {
+  writeToLogFile('CRITICAL', \`Uncaught Exception: \${err ? err.stack || err : 'Unknown error'}\\n\`);
+  try {
+    logStream.end(() => {
+      process.exit(1);
+    });
+  } catch (e) {
     process.exit(1);
-  });
+  }
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -114,22 +124,24 @@ console.log('Node Version:', process.version);
 console.log('Platform:', process.platform);
 console.log('Working Directory:', __dirname);
 console.log('PORT env:', process.env.PORT);
-console.log('UV_THREADPOOL_SIZE:', process.env.UV_THREADPOOL_SIZE);
-console.log('NODE_OPTIONS:', process.env.NODE_OPTIONS);
 
-// Agora importamos os outros pacotes que podem falhar dependendo da versão do Node ou dependências ausentes
 const { createServer } = require('http');
 const { parse } = require('url');
 const next = require('next');
 
 const dev = false;
-const app = next({ dev, dir: __dirname });
-const handle = app.getRequestHandler();
-
 const port = process.env.PORT || 3000;
-const host = '0.0.0.0';
-
 const isNumeric = !isNaN(port) && !isNaN(parseFloat(port));
+const hostname = isNumeric ? '0.0.0.0' : 'localhost';
+
+const app = next({
+  dev: false,
+  dir: __dirname,
+  hostname,
+  port: isNumeric ? Number(port) : 3000
+});
+
+const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   console.log('Next.js app preparado com sucesso.');
@@ -139,12 +151,12 @@ app.prepare().then(() => {
   });
 
   if (isNumeric) {
-    server.listen(Number(port), host, (err) => {
+    server.listen(Number(port), hostname, (err) => {
       if (err) throw err;
-      console.log(\`> Ready on port \${port} on \${host}\`);
+      console.log(\`> Ready on port \${port} on \${hostname}\`);
     });
   } else {
-    // Se for Unix socket, escuta diretamente no caminho do arquivo
+    // Se for Unix socket do Passenger (caminho em arquivo ou pipe)
     server.listen(port, (err) => {
       if (err) throw err;
       console.log(\`> Ready on socket \${port}\`);
@@ -152,6 +164,7 @@ app.prepare().then(() => {
   }
 }).catch((err) => {
   console.error('Erro durante a preparação do app Next.js:', err);
+  writeToLogFile('CRITICAL', \`Erro app.prepare(): \${err ? err.stack || err : err}\\n\`);
   process.exit(1);
 });
 `;

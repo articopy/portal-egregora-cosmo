@@ -5,7 +5,7 @@ import { createAssinafyDocument } from "@/lib/services/assinafy";
 import { getAuthenticatedUser, isUserAdmin } from "@/lib/auth";
 import { fetchWeeklyUploadsCount } from "@/lib/services/youtube";
 import { checkPaymentStatus } from "@/lib/services/asaas";
-import { sendCreatorRegisteredNotification } from "@/lib/services/email";
+import { sendCreatorRegisteredNotification, sendCreatorWelcomeAndTrainingNotification } from "@/lib/services/email";
 
 // Helper to enrich condomino with weekly video upload counts
 async function enrichCondominoWithDeliveries(c: any, semanaCodigo: string, publishedAfterStr: string) {
@@ -72,12 +72,44 @@ async function syncCondominoPayment(c: any) {
       const hasPaid = await checkPaymentStatus(c.asaas_id);
       if (hasPaid) {
         console.log(`[Auto-Sync Payment] Condômino ${c.nome_comercial} has paid. Updating status to ATIVO_ADIMPLENTE.`);
+        const shouldSendWelcome = !c.boas_vindas_enviada;
+        const updateData: any = { status: "ATIVO_ADIMPLENTE" };
+        if (shouldSendWelcome) {
+          updateData.boas_vindas_enviada = true;
+          updateData.boas_vindas_enviada_em = new Date().toISOString();
+        }
+
         const { error } = await supabase
           .from("condominos")
-          .update({ status: "ATIVO_ADIMPLENTE" })
+          .update(updateData)
           .eq("id", c.id);
+
         if (!error) {
           c.status = "ATIVO_ADIMPLENTE";
+          if (shouldSendWelcome) {
+            c.boas_vindas_enviada = true;
+            c.boas_vindas_enviada_em = updateData.boas_vindas_enviada_em;
+
+            // Disparar e-mail de boas-vindas com treinamentos obrigatórios SOMENTE 1 VEZ
+            (async () => {
+              try {
+                const { data: mandatoryModules } = await supabase
+                  .from("treinamento_modulos")
+                  .select("*")
+                  .eq("ativo", true)
+                  .eq("obrigatorio", true)
+                  .order("ordem", { ascending: true });
+
+                await sendCreatorWelcomeAndTrainingNotification({
+                  creator: c,
+                  mandatoryModules: mandatoryModules || []
+                });
+                console.log(`[Auto-Sync Payment] E-mail de boas-vindas e treinamento enviado para: ${c.nome_comercial} (${c.email})`);
+              } catch (mailErr) {
+                console.error("[Auto-Sync Payment] Erro ao enviar e-mail de boas-vindas do treinamento:", mailErr);
+              }
+            })();
+          }
         }
       }
     } catch (err) {
