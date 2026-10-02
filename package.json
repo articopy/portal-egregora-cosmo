@@ -4,30 +4,31 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build --webpack",
+    "start": "node server.js",
     "lint": "eslint",
     "build:deploy": "node build-deploy.js",
     "pack:source": "node pack-source.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
+    "@tailwindcss/postcss": "^4",
     "docxtemplater": "^3.68.7",
-    "next": "16.2.7",
-    "nodemailer": "^9.0.3",
+    "next": "^16.3.8",
+    "nodemailer": "^10.0.13",
     "pizzip": "^3.2.0",
+    "postcss": "^8.4.31",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "tailwindcss": "^4"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.7",
-    "tailwindcss": "^4",
+    "eslint-config-next": "^16.3.8",
     "typescript": "^5"
   }
 }
